@@ -1,8 +1,11 @@
 package org.sagebionetworks;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.io.UnsupportedEncodingException;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -11,6 +14,7 @@ import java.util.Properties;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
 
+import org.apache.commons.io.IOUtils;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -33,12 +37,14 @@ import org.sagebionetworks.repo.model.annotation.LongAnnotation;
 import org.sagebionetworks.repo.model.annotation.StringAnnotation;
 import org.sagebionetworks.repo.model.message.MessageToUser;
 
+import com.google.common.io.Files;
+
 
 /**
  * Olfaction scoring application
  * 
  */
-public class SynapseChallengeTemplate {    
+public class OlfactionChallengeScoring {    
     // the page size can be bigger, we do this just to demonstrate pagination
     private static int PAGE_SIZE = 20;
     
@@ -50,33 +56,78 @@ public class SynapseChallengeTemplate {
 	private static Properties properties = null;
 
     private SynapseClient synapseAdmin;
-    private Evaluation evaluation;
+    
+
+    private static String executePerlScript(String name, String[] params) throws IOException {
+	    File scriptFile = File.createTempFile(name, ".pl");
+    	InputStream in = OlfactionChallengeScoring.class.getClassLoader().getResourceAsStream(name);
+   		OutputStream out = null;
+   	    try {
+   	    	out = new FileOutputStream(scriptFile);
+    		IOUtils.copy(in, out);
+    		out.close();
+    		out = null;
+    	} finally {
+    		in.close();
+    		if (out!=null) out.close();
+    	}
+   	    String[] commandAndParams = new String[params.length+1];
+   	    commandAndParams[0] = "perl "+scriptFile.getAbsolutePath();
+   	    System.arraycopy(params, 0, commandAndParams, 1, params.length);
+   	    String[] envp = new String[0];
+   	    File workingDirectory = Files.createTempDir();
+   	    Process process = Runtime.getRuntime().exec(commandAndParams, envp, workingDirectory);
+   	    try {
+   	    	process.waitFor();
+   	    } catch (InterruptedException e) {
+   	    	throw new RuntimeException(e);
+   	    }
+   	    int exitValue = process.exitValue();
+   	    ByteArrayOutputStream resultOS = new ByteArrayOutputStream();
+   	    String result = null;
+   	    try {
+   	    	if (exitValue==0) {
+   	    		IOUtils.copy(process.getInputStream(), resultOS);
+   	    	} else {
+  	    		IOUtils.copy(process.getErrorStream(), resultOS);
+   	    	}
+   	    	resultOS.close();
+   	    	result = new String(resultOS.toByteArray(), "UTF-8");
+   	    } finally {
+   	    	if (resultOS!=null) resultOS.close();
+   	    }
+   	    if (exitValue!=0) {
+   	    	throw new RuntimeException(result);
+   	    }
+   	    return result;
+    }
     
     public static void main( String[] args ) throws Exception {
-   		SynapseChallengeTemplate sct = new SynapseChallengeTemplate();
+   		OlfactionChallengeScoring sct = new OlfactionChallengeScoring();
    	    try {
-    		sct.validate();
-       		sct.score();
-    	} finally {
+   	    	// validate and score subchallenge 1
+    		sct.validate(SUBCHALLENGE.SUBCHALLENGE_1, "3154769");
+       		sct.score(SUBCHALLENGE.SUBCHALLENGE_1, "3154769");
+       		
+   	    	// validate and score subchallenge 2
+    		sct.validate(SUBCHALLENGE.SUBCHALLENGE_2, "3154771");
+       		sct.score(SUBCHALLENGE.SUBCHALLENGE_2, "3154771");
+       		
+       		// TODO for final round, just zip up submitted files for manual scoring
+   	} finally {
     	}
     }
     
-    public SynapseChallengeTemplate() throws SynapseException {
+    public OlfactionChallengeScoring() throws SynapseException {
     	synapseAdmin = createSynapseClient();
     	String adminUserName = getProperty("ADMIN_USERNAME");
     	String adminPassword = getProperty("ADMIN_PASSWORD");
     	synapseAdmin.login(adminUserName, adminPassword);
     }
     
-    /**
-     * Create a project for the Challenge.
-     * Create the Evaluation queue.
-     * Provide access to the participant.
-     * @throws UnsupportedEncodingException  
-     */
-    public void setUp() throws SynapseException, UnsupportedEncodingException {
-    	// TODO retrieve the evaluation queue
-    	evaluation = new Evaluation();
+    enum SUBCHALLENGE {
+    	SUBCHALLENGE_1,
+    	SUBCHALLENGE_2
     }
     
     /**
@@ -88,20 +139,20 @@ public class SynapseChallengeTemplate {
      * 
      * @throws SynapseException
      */
-    public void validate() throws SynapseException, IOException {
+    public void validate(SUBCHALLENGE subchallenge, String evaluationId) throws SynapseException, IOException {
     	List<SubmissionStatus> statusesToUpdate = new ArrayList<SubmissionStatus>();
     	long total = Integer.MAX_VALUE;
        	for (int offset=0; offset<total; offset+=PAGE_SIZE) {
        			// get the newly RECEIVED Submissions
        		PaginatedResults<SubmissionBundle> submissionPGs = 
-       			synapseAdmin.getAllSubmissionBundlesByStatus(evaluation.getId(), SubmissionStatusEnum.RECEIVED, offset, PAGE_SIZE);
+       			synapseAdmin.getAllSubmissionBundlesByStatus(evaluationId, SubmissionStatusEnum.RECEIVED, offset, PAGE_SIZE);
         	total = (int)submissionPGs.getTotalNumberOfResults();
         	List<SubmissionBundle> page = submissionPGs.getResults();
         	for (int i=0; i<page.size(); i++) {
         		SubmissionBundle bundle = page.get(i);
         		Submission sub = bundle.getSubmission();
        			File temp = downloadSubmissionFile(sub);
-       			// Examine file to decide whether the submission is valid
+       			// TODO Examine file to decide whether the submission is valid
        			boolean fileIsOK = true;
        			
        			SubmissionStatusEnum newStatus = null;
@@ -110,6 +161,8 @@ public class SynapseChallengeTemplate {
        			} else {
        				newStatus = SubmissionStatusEnum.INVALID;
        				// send the user an email message to let them know
+       				// TODO include the detailed error information from the Perl script
+       				// TODO in the message be clear about which sub challenge the submission was sent to
        				sendMessage(sub.getUserId(), SUB_ACK_SUBJECT, SUB_ACK_INVALID);
        			}
            		SubmissionStatus status = bundle.getSubmissionStatus();
@@ -118,7 +171,7 @@ public class SynapseChallengeTemplate {
         	}
        	}
        	// we can update all the statuses in a batch
-       	updateSubmissionStatusBatch(statusesToUpdate);
+       	updateSubmissionStatusBatch(evaluationId, statusesToUpdate);
     }
     
     private static final String SUB_ACK_SUBJECT = "Submission Acknowledgment";
@@ -137,32 +190,23 @@ public class SynapseChallengeTemplate {
      * 
      * @throws SynapseException
      */
-    public void score() throws SynapseException, IOException {
+    public void score(SUBCHALLENGE subchallenge, String evaluationId) throws SynapseException, IOException {
     	long startTime = System.currentTimeMillis();
     	List<SubmissionStatus> statusesToUpdate = new ArrayList<SubmissionStatus>();
     	long total = Integer.MAX_VALUE;
        	for (int offset=0; offset<total; offset+=PAGE_SIZE) {
        		PaginatedResults<SubmissionBundle> submissionPGs = null;
-       		if (true) { 
-       			// get ALL the submissions in the Evaluation
-       			submissionPGs = synapseAdmin.getAllSubmissionBundles(evaluation.getId(), offset, PAGE_SIZE);
-       		} else {
-       			// alternatively just get the unscored submissions in the Evaluation
-       			// here we get the ones that the 'validation' step (above) marked as validated
-       			submissionPGs = synapseAdmin.getAllSubmissionBundlesByStatus(evaluation.getId(), SubmissionStatusEnum.VALIDATED, offset, PAGE_SIZE);
-       		}
+       		// alternatively just get the unscored submissions in the Evaluation
+       		// here we get the ones that the 'validation' step (above) marked as validated
+       		submissionPGs = synapseAdmin.getAllSubmissionBundlesByStatus(evaluationId, SubmissionStatusEnum.VALIDATED, offset, PAGE_SIZE);
         	total = (int)submissionPGs.getTotalNumberOfResults();
         	List<SubmissionBundle> page = submissionPGs.getResults();
         	for (int i=0; i<page.size(); i++) {
         		SubmissionBundle bundle = page.get(i);
         		Submission sub = bundle.getSubmission();
         		// at least once, download file and make sure it's correct
-        		if (offset==0 && i==0) {
-        			File temp = downloadSubmissionFile(sub);
-//        			String expectedMD5 = MD5ChecksumHelper.getMD5ChecksumForByteArray(FILE_CONTENT.getBytes(Charset.defaultCharset()));
-//        			String actualMD5 = MD5ChecksumHelper.getMD5Checksum(temp);
-//        			if (!expectedMD5.equals(actualMD5)) throw new IllegalStateException("Downloaded file does not have expected content.");
-        		}
+    			File temp = downloadSubmissionFile(sub);
+    			// TODO pass 'temp' to the Perl script for scoring
         		SubmissionStatus status = bundle.getSubmissionStatus();
         		SubmissionStatusEnum currentStatus = status.getStatus();
         		if (currentStatus.equals(SubmissionStatusEnum.SCORED)) {
@@ -173,15 +217,23 @@ public class SynapseChallengeTemplate {
         			annotations=new Annotations();
         			status.setAnnotations(annotations);
         		}
-    			addAnnotations(annotations, offset+i+1);
-    			status.setStatus(SubmissionStatusEnum.SCORED);
+        		// get the score from the Perl script to the annotations
+        		double score = 100d;
+       			status.setStatus(SubmissionStatusEnum.SCORED);
+       		    addAnnotations(
+    					annotations, 
+    					sub.getSubmitterAlias(),
+    					sub.getCreatedOn().getTime(),
+    					score,
+    					sub.getName()
+    					);
     			statusesToUpdate.add(status);
         	}
        	}
        	
        	System.out.println("Retrieved "+total+" submissions for scoring.");
        	
-       	updateSubmissionStatusBatch(statusesToUpdate);
+       	updateSubmissionStatusBatch(evaluationId, statusesToUpdate);
        	
        	System.out.println("Scored "+statusesToUpdate.size()+" submissions.");
        	long delta = System.currentTimeMillis() - startTime;
@@ -190,7 +242,7 @@ public class SynapseChallengeTemplate {
     
     private static final int BATCH_UPLOAD_RETRY_COUNT = 3;
     
-    private void updateSubmissionStatusBatch(List<SubmissionStatus> statusesToUpdate) throws SynapseException {
+    private void updateSubmissionStatusBatch(String evaluationId, List<SubmissionStatus> statusesToUpdate) throws SynapseException {
        	// now we have a batch of statuses to update
     	for (int retry=0; retry<BATCH_UPLOAD_RETRY_COUNT; retry++) {
     		try {
@@ -208,7 +260,7 @@ public class SynapseChallengeTemplate {
 		       		updateBatch.setIsLastBatch(isLastBatch);
 		       		updateBatch.setBatchToken(batchToken);
 		       		BatchUploadResponse response = 
-		       				synapseAdmin.updateSubmissionStatusBatch(evaluation.getId(), updateBatch);
+		       				synapseAdmin.updateSubmissionStatusBatch(evaluationId, updateBatch);
 		       		batchToken = response.getNextUploadToken();
 		       	}
 		       	break; // success!
@@ -249,29 +301,36 @@ public class SynapseChallengeTemplate {
         return String.format("%02dh:%02dm:%02d.%03ds", hr, min, sec, ms);
     }
     
-    private static final String STRING_ANNOTATION_NAME = "aString";
-    
-    private static void addAnnotations(Annotations a, int i) {
-		StringAnnotation sa = new StringAnnotation();
-		// the 'isPrivate' flag should be set to 'true' for information
-		// used by the scoring application but not to be revealed to participants
-		// to see 'public' annotations requires READ access in the Evaluation's
-		// access control list, as the participant has (see setUp(), above). To
-		// see 'private' annotatations requires READ_PRIVATE_SUBMISSION access,
-		// which the Evaluation admin has by default
-		sa.setIsPrivate(false);
-		sa.setKey(STRING_ANNOTATION_NAME);
-		sa.setValue("xyz"+i);
+    private static void addAnnotations(
+    		Annotations a, 
+    		String alias,
+    		long createOn,
+    		double score,
+    		String description
+    		) {
 		List<StringAnnotation> sas = a.getStringAnnos();
 		if (sas==null) {
 			sas = new ArrayList<StringAnnotation>();
 			a.setStringAnnos(sas);
 		}
-		sas.add(sa);
+		{
+			StringAnnotation sa = new StringAnnotation();
+			sa.setIsPrivate(false);
+			sa.setKey("Team");
+			sa.setValue(alias);
+			sas.add(sa);
+		}
+		{
+			StringAnnotation sa = new StringAnnotation();
+			sa.setIsPrivate(false);
+			sa.setKey("Description");
+			sa.setValue(description);
+			sas.add(sa);
+		}
 		DoubleAnnotation da = new DoubleAnnotation();
 		da.setIsPrivate(false);
-		da.setKey("correlation");
-		da.setValue(random.nextDouble());
+		da.setKey("Score");
+		da.setValue(score);
 		List<DoubleAnnotation> das = a.getDoubleAnnos();
 		if (das==null) {
 			das = new ArrayList<DoubleAnnotation>();
@@ -280,8 +339,8 @@ public class SynapseChallengeTemplate {
 		das.add(da);
 		LongAnnotation la = new LongAnnotation();
 		la.setIsPrivate(false);
-		la.setKey("rank");
-		la.setValue((long)i);
+		la.setKey("createdOnPublic");
+		la.setValue(createOn);
 		List<LongAnnotation> las = a.getLongAnnos();
 		if (las==null) {
 			las = new ArrayList<LongAnnotation>();
@@ -296,7 +355,7 @@ public class SynapseChallengeTemplate {
 		properties = new Properties();
 		InputStream is = null;
     	try {
-    		is = SynapseChallengeTemplate.class.getClassLoader().getResourceAsStream("global.properties");
+    		is = OlfactionChallengeScoring.class.getClassLoader().getResourceAsStream("global.properties");
     		properties.load(is);
     	} catch (IOException e) {
     		throw new RuntimeException(e);
