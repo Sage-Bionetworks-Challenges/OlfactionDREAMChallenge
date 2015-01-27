@@ -1,8 +1,10 @@
 package org.sagebionetworks;
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import java.io.File;
+import java.util.Map;
 
 import org.junit.Before;
 import org.junit.Test;
@@ -48,13 +50,25 @@ public class TestPerlIntegration {
 	public void testSubchallenge1Scoring() throws Exception {
 		File inputFile;
 		File goldStandardFile; 
-		String result;
+		Map<String,Double> result;
 		
 		inputFile = OlfactionChallengeScoring.writeResourceToFile("Test_LB_S1/test_ok.txt", null);
-		goldStandardFile = OlfactionChallengeScoring.writeResourceToFile("Test_LB_S1/test_ok.txt", null); // not really a gold standard...
+		goldStandardFile = OlfactionChallengeScoring.writeResourceToFile("fakeGoldStandardLBs1.txt", null);
 		result = OlfactionChallengeScoring.score(OlfactionChallengeScoring.SUBCHALLENGE.SUBCHALLENGE_1, inputFile, goldStandardFile);
-		o("\n========\n"+result+"\n========\n");
-		assertFalse(result.contains("NOT_OK"));
+		assertEquals(4, result.size());
+	}
+
+
+	@Test
+	public void testSubchallenge2Scoring() throws Exception {
+		File inputFile;
+		File goldStandardFile; 
+		Map<String,Double> result;
+		
+		inputFile = OlfactionChallengeScoring.writeResourceToFile("Test_LB_S2/test_ok.txt", null);
+		goldStandardFile = OlfactionChallengeScoring.writeResourceToFile("fakeGoldStandardLBs2.txt", null);
+		result = OlfactionChallengeScoring.score(OlfactionChallengeScoring.SUBCHALLENGE.SUBCHALLENGE_2, inputFile, goldStandardFile);
+		assertEquals(7, result.size());
 	}
 
 }

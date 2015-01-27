@@ -7,11 +7,15 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Properties;
-import java.util.Random;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.commons.io.IOUtils;
@@ -35,22 +39,14 @@ import org.sagebionetworks.repo.model.annotation.DoubleAnnotation;
 import org.sagebionetworks.repo.model.annotation.LongAnnotation;
 import org.sagebionetworks.repo.model.annotation.StringAnnotation;
 import org.sagebionetworks.repo.model.message.MessageToUser;
+import org.sagebionetworks.repo.model.query.QueryTableResults;
+import org.sagebionetworks.repo.model.query.Row;
 
 
 /**
  * Olfaction scoring application
  * 
  */
-//
-// TODO add try-catch around each submission, so no submission breaks the app'
-//
-// TODO implement per-subchallenge limits (300 for SC1, 30 for SC2 in LB phase; 
-// TODO 1 and 1 for final phase; subsequent sub's are rejected)
-//
-// TODO implement 4 notifications:  (1) validation failure (include output of validation script), 
-// (2) exceeding submission limit, (3) scoring failure, (4) success
-//
-// TODO:  map scoring metrics to leader board
 // 
 public class OlfactionChallengeScoring {    
     // the page size can be bigger, we do this just to demonstrate pagination
@@ -68,7 +64,41 @@ public class OlfactionChallengeScoring {
     	SUBCHALLENGE_2
     }
     
-    /*
+    
+    private static final String[] SUB_CHALLENGE_1_METRICS = new String[]{"avg intensity", "avg valence", "avg 19 other", "avg of Z-scores"};
+    private static final int SUB_CHALLENGE_1_QUOTA = 2; //300;
+    private static final String[] SUB_CHALLENGE_2_METRICS = new String[]{"intensity val" ,  "valence val" ,  "19 other val" , "intensity sigma" ,  "valence sigma" ,  "19 other sigma", "avg of Z-scores"};
+    private static final int SUB_CHALLENGE_2_QUOTA = 2; //30;
+
+    public static void main( String[] args ) throws Exception {
+   		OlfactionChallengeScoring sct = new OlfactionChallengeScoring();
+   		
+   		sct.checkLeaderBoard();
+
+    	// validate and score subchallenge 1
+		sct.validate(SUBCHALLENGE.SUBCHALLENGE_1, "3154769");
+   		sct.score(SUBCHALLENGE.SUBCHALLENGE_1, "3154769", SUB_CHALLENGE_1_QUOTA);
+   		
+    	// validate and score subchallenge 2
+		sct.validate(SUBCHALLENGE.SUBCHALLENGE_2, "3154771");
+   		sct.score(SUBCHALLENGE.SUBCHALLENGE_2, "3154771", SUB_CHALLENGE_2_QUOTA);
+   		
+   		// TODO for final round, do we just zip up submitted files for manual scoring?
+
+    }
+    
+    public void checkLeaderBoard() throws Exception {
+    	QueryTableResults qtr = synapseAdmin.queryEvaluation("select * from evaluation_3154769");
+    	System.out.println("Headers: "+qtr.getHeaders());
+    	for (Row row : qtr.getRows()) {
+    		for (String value : row.getValues()) {
+    			System.out.print(value+"\t");
+    		}
+    		System.out.println("");
+    	}
+    }
+    
+   /*
      * NOTE: The returned file is a TEMPORARY file, slated for deletion when the process exits.
      */
     public static File writeResourceToFile(String name, File directory) throws IOException {
@@ -94,12 +124,11 @@ public class OlfactionChallengeScoring {
     	return result;
     }
     
-    private static Random random = new Random();
-
     /*
      * @param name:  the file name in src/main/resources
-     * @param inputFile: the input file for the script
-     * @param params: the params to pass, after perl <script file> <inputFile> <output file>
+     * @param params: the params to pass, after perl <script file> 
+     * @param outputFile: the file into which the script is to write its results
+     * @param workingDirectory: the working directory for the process (returned by 'cwd' in Perl)
      */
     public static String executePerlScript(String name, String[] params, File outputFile, File workingDirectory) throws IOException {
        	File scriptFile = writeResourceToFile(name, workingDirectory);
@@ -161,8 +190,7 @@ public class OlfactionChallengeScoring {
 	    	throw new IllegalArgumentException(subchallenge.name());
 	    }
 	    if (!(phase.equals("L") || phase.equals("F"))) throw new IllegalArgumentException(phase);
-		File outputFile = File.createTempFile("scriptOutput", ".txt");//new File(workingDirectory, outputFileName);
-  	    //String outputFileName = "scriptOutput"+Math.abs(random.nextLong())+".txt";
+		File outputFile = File.createTempFile("scriptOutput", ".txt");
 		outputFile.deleteOnExit();
 		File workingDirectory = outputFile.getParentFile();;
 	    // note, the validation file expects the input file PATH but the output file NAME
@@ -170,53 +198,63 @@ public class OlfactionChallengeScoring {
  				new String[]{inputFile.getAbsolutePath(), outputFile.getName(), phase}, outputFile, workingDirectory);
     }
     
-    public static String score(SUBCHALLENGE subchallenge, File inputFile, File goldStandard) throws IOException {
+    public static Map<String,Double> score(SUBCHALLENGE subchallenge, File inputFile, File goldStandard) throws IOException {
 	    String scriptName;
-	    
+	    String[] metrics;
 	    switch (subchallenge) {
 	    case SUBCHALLENGE_1:
 	    	scriptName = "DREAM_Olfaction_scoring_Q1.pl";
+	    	metrics = SUB_CHALLENGE_1_METRICS;
 	    	break;
 	    case SUBCHALLENGE_2:
 	    	scriptName = "DREAM_Olfaction_scoring_Q2.pl";
+	    	metrics = SUB_CHALLENGE_2_METRICS;
 	    	break;
 	    default:
 	    	throw new IllegalArgumentException(subchallenge.name());
 	    }
-		File outputFile = File.createTempFile("scriptOutput", ".txt");//new File(workingDirectory, outputFileName);
-  	    //String outputFileName = "scriptOutput"+Math.abs(random.nextLong())+".txt";
+		File outputFile = File.createTempFile("scriptOutput", ".txt");
 		outputFile.deleteOnExit();
 		File workingDirectory = outputFile.getParentFile();
 		if (!workingDirectory.getAbsolutePath().equals(inputFile.getParentFile().getAbsolutePath())) throw new RuntimeException();
 	    // NOTE: Perl script expects input file NAME, output file NAME (not PATH).  Both must be in working directory
 	    // However, gold standard is to be a file PATH
-		return OlfactionChallengeScoring.executePerlScript(scriptName, 
+		String scriptOutput = OlfactionChallengeScoring.executePerlScript(scriptName, 
 				new String[]{inputFile.getName(), outputFile.getName(), 
 				goldStandard.getAbsolutePath()}, outputFile, workingDirectory);
+		String[] lines = scriptOutput.trim().split("[\n|\r|\r\n]");
+		if (lines.length!=2) throw new RuntimeException("Expected 2 lines but found "+lines.length);
+		String[] header = lines[0].split("\t");
+		if (header.length!=metrics.length) throw new 
+			RuntimeException("Expected "+metrics.length+" metrics but found "+header.length);
+		for (int i=0; i<header.length; i++) {
+			if (!header[i].trim().equalsIgnoreCase(metrics[i])) throw new 
+			RuntimeException("Expected "+metrics[i]+" but found "+header[i]);
+		}
+		String[] valueStrings = lines[1].split("\t");
+		if (valueStrings.length!=metrics.length) throw new 
+			RuntimeException("Expected "+metrics.length+" metrics but found "+valueStrings.length);
+		Map<String,Double> result = new HashMap<String,Double>();
+		for (int i=0; i<valueStrings.length; i++) {
+			double value;
+			if (valueStrings[i]==null || valueStrings[i].length()==0) {
+				value = 0d;
+			} else {
+				value = Double.parseDouble(valueStrings[i]);
+			}
+			result.put(metrics[i], value);
+		}
+		return result;
     }
     
-    public static void main( String[] args ) throws Exception {
-   		OlfactionChallengeScoring sct = new OlfactionChallengeScoring();
-   	    try {
-   	    	// validate and score subchallenge 1
-    		sct.validate(SUBCHALLENGE.SUBCHALLENGE_1, "3154769");
-       		sct.score(SUBCHALLENGE.SUBCHALLENGE_1, "3154769");
-       		
-   	    	// validate and score subchallenge 2
-    		sct.validate(SUBCHALLENGE.SUBCHALLENGE_2, "3154771");
-       		sct.score(SUBCHALLENGE.SUBCHALLENGE_2, "3154771");
-       		
-       		// TODO for final round, do we just zip up submitted files for manual scoring?
-   	} finally {
-    	}
-    }
-    
-    public OlfactionChallengeScoring() throws SynapseException {
+     public OlfactionChallengeScoring() throws SynapseException {
     	synapseAdmin = createSynapseClient();
     	String adminUserName = getProperty("ADMIN_USERNAME");
     	String adminPassword = getProperty("ADMIN_PASSWORD");
     	synapseAdmin.login(adminUserName, adminPassword);
     }
+    
+    private static final DateFormat DF = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
     
     /**
      * This demonstrates a lightweight validation step
@@ -230,6 +268,7 @@ public class OlfactionChallengeScoring {
     public void validate(SUBCHALLENGE subchallenge, String evaluationId) throws SynapseException, IOException {
     	List<SubmissionStatus> statusesToUpdate = new ArrayList<SubmissionStatus>();
     	long total = Integer.MAX_VALUE;
+		String subChallengeString = subchallenge==SUBCHALLENGE.SUBCHALLENGE_1 ? "Sub-Challenge 1": "Sub-Challenge 2";
        	for (int offset=0; offset<total; offset+=PAGE_SIZE) {
        			// get the newly RECEIVED Submissions
        		PaginatedResults<SubmissionBundle> submissionPGs = 
@@ -241,8 +280,15 @@ public class OlfactionChallengeScoring {
         		Submission sub = bundle.getSubmission();
        			File temp = downloadSubmissionFile(sub);
        			temp.deleteOnExit();
-       			String validationResult = validate(subchallenge,temp, "L"/*"leader board" phase*/);
-       			boolean fileIsOK = !validationResult.contains("NOT_OK");
+       			boolean fileIsOK = true;
+       			String validationResult = "";
+       			try {
+       				validationResult = validate(subchallenge,temp, "L"/*"leader board" phase*/);
+       				fileIsOK = !validationResult.contains("NOT_OK");
+       			} catch (Exception e) {
+       				fileIsOK = false;
+       				validationResult = "Unable to validate submission. Please contact Challenge administration.";
+       			}
        			
        			SubmissionStatusEnum newStatus = null;
        			if (fileIsOK) {
@@ -250,8 +296,10 @@ public class OlfactionChallengeScoring {
        			} else {
        				newStatus = SubmissionStatusEnum.INVALID;
        				// send the user an email message to let them know
-       				// TODO in the message be clear about which sub challenge the submission was sent to
-       				sendMessage(sub.getUserId(), SUB_ACK_SUBJECT, SUB_ACK_INVALID+"\n"+validationResult);
+       				sendMessage(sub.getUserId(), "Submission Failure", 
+       						"Dear Participant:\nYour submission to  Olfaction "+subChallengeString+", received on "+
+       						DF.format(sub.getCreatedOn())+", was invalid.  Please try again.  Details are given below.\n"+
+       						"Sincerely,\nChallenge Administration\n\n"+validationResult);
        			}
            		SubmissionStatus status = bundle.getSubmissionStatus();
            		status.setStatus(newStatus);
@@ -261,9 +309,6 @@ public class OlfactionChallengeScoring {
        	// we can update all the statuses in a batch
        	updateSubmissionStatusBatch(evaluationId, statusesToUpdate);
     }
-    
-    private static final String SUB_ACK_SUBJECT = "Submission Acknowledgment";
-    private static final String SUB_ACK_INVALID = "Your submission is invalid. Please try again.";
        
     private void sendMessage(String userId, String subject, String body) throws SynapseException {
     	MessageToUser messageMetadata = new MessageToUser();
@@ -272,17 +317,27 @@ public class OlfactionChallengeScoring {
     	synapseAdmin.sendStringMessage(messageMetadata, body);
     }
     
+    private int getSubmissionCount(String userId, String evaluationId) throws SynapseException {
+    	QueryTableResults qtr = synapseAdmin.queryEvaluation("select * from evaluation_"+evaluationId+" where userId==\""+
+    			userId+"\" and status==\"SCORED\" limit 1 offset 0");
+    	return qtr.getTotalNumberOfResults().intValue();
+    }
+    
     /**
      * Note: There are two types of scoring, that in which each submission is scored alone and that
      * in which the entire set of submissions is rescored whenever a new one arrives. 
      * 
      * @throws SynapseException
      */
-    public void score(SUBCHALLENGE subchallenge, String evaluationId) throws SynapseException, IOException {
+    public void score(SUBCHALLENGE subchallenge, String evaluationId, int submissionQuota) throws SynapseException, IOException {
     	long startTime = System.currentTimeMillis();
     	List<SubmissionStatus> statusesToUpdate = new ArrayList<SubmissionStatus>();
     	long total = Integer.MAX_VALUE;
     	File goldStandard = null;
+    	Map<String,Integer> submissionsPerUser = new HashMap<String,Integer>();
+       	Map<String,List<Date>> overQuota = new HashMap<String,List<Date>>();
+       	Map<String,List<Date>> scoringFailed = new HashMap<String,List<Date>>();
+          		String subChallengeString = subchallenge==SUBCHALLENGE.SUBCHALLENGE_1 ? "Sub-Challenge 1": "Sub-Challenge 2";
        	for (int offset=0; offset<total; offset+=PAGE_SIZE) {
        		PaginatedResults<SubmissionBundle> submissionPGs = null;
        		// alternatively just get the unscored submissions in the Evaluation
@@ -293,6 +348,26 @@ public class OlfactionChallengeScoring {
         	for (int i=0; i<page.size(); i++) {
         		SubmissionBundle bundle = page.get(i);
         		Submission sub = bundle.getSubmission();
+           		SubmissionStatus status = bundle.getSubmissionStatus();
+        		
+        		// have we exceeded the quota?
+        		Integer submissionCount = submissionsPerUser.get(sub.getUserId());
+        		if (submissionCount==null) {
+        			submissionCount = getSubmissionCount(sub.getUserId(), evaluationId);
+        			submissionsPerUser.put(sub.getUserId(), submissionCount);
+        		}
+         		if (submissionCount>=submissionQuota) {
+           			List<Date> overQuotaList = overQuota.get(sub.getUserId());
+           			if (overQuotaList==null) {
+           				overQuotaList = new ArrayList<Date>();
+           				overQuota.put(sub.getUserId(), overQuotaList);
+           			}
+           			overQuotaList.add(sub.getCreatedOn());
+         			status.setStatus(SubmissionStatusEnum.REJECTED);
+          			statusesToUpdate.add(status);
+      				continue;
+        		}
+        		
         		// at least once, download file and make sure it's correct
     			File temp = downloadSubmissionFile(sub);
     			if (goldStandard==null) {
@@ -300,17 +375,20 @@ public class OlfactionChallengeScoring {
     				goldStandard.deleteOnExit();
     				synapseAdmin.downloadFromFileEntityCurrentVersion(getProperty("GS_ENTITY_ID_L_"+subchallenge), goldStandard);
     			}
-    			
-        		double score = 0d;
-        		SubmissionStatus status = bundle.getSubmissionStatus();
-        		try {
-    				String s = score(subchallenge, temp, goldStandard);
-    				// TODO map all output values from the script into submission annotations
+    			Map<String,Double> metrics;
+         		try {
+        			metrics = score(subchallenge, temp, goldStandard);
            			status.setStatus(SubmissionStatusEnum.SCORED);
-           			score = 100d;
+           			submissionsPerUser.put(sub.getUserId(), submissionCount+1);
         		} catch (Exception e) {
            			status.setStatus(SubmissionStatusEnum.REJECTED);
-           			score = 0d;
+           			List<Date> rejectedList = scoringFailed.get(sub.getUserId());
+           			if (rejectedList==null) {
+           				rejectedList = new ArrayList<Date>();
+           				scoringFailed.put(sub.getUserId(), rejectedList);
+           			}
+           			rejectedList.add(sub.getCreatedOn());
+           			metrics = new HashMap<String,Double>();
         		}
 
         		Annotations annotations = status.getAnnotations();
@@ -322,7 +400,7 @@ public class OlfactionChallengeScoring {
     					annotations, 
     					sub.getSubmitterAlias(),
     					sub.getCreatedOn().getTime(),
-    					score,
+    					metrics,
     					sub.getName()
     					);
     			statusesToUpdate.add(status);
@@ -332,6 +410,53 @@ public class OlfactionChallengeScoring {
        	System.out.println("Retrieved "+total+" submissions for scoring.");
        	
        	updateSubmissionStatusBatch(evaluationId, statusesToUpdate);
+       	
+       	
+       	for (String rejectedUser : scoringFailed.keySet()) {
+       		List<Date> rejectedTimeStamps = scoringFailed.get(rejectedUser);
+       		String message;
+       		if (rejectedTimeStamps.size()==1) {
+    			message = "Dear Participant:\nYour submission to Olfaction Prediction "+subChallengeString+", received on "+
+   						DF.format(rejectedTimeStamps.get(0))+", was rejected.  Please try again or contact us for help.\n"+
+   						"Sincerely,\nChallenge Administration";
+      		} else {
+           		StringBuilder sb = new StringBuilder();
+           		boolean firstTime = true;
+           		for (Date d: rejectedTimeStamps) {
+           			if (firstTime) firstTime=false; else sb.append(", ");
+           			sb.append(DF.format(d));
+           		}
+           		message = "Dear Participant:\nYour submissions to Olfaction Prediction "+subChallengeString+", received on "+
+   						sb+", were rejected.  Please try again or contact us for help.\n"+
+   						"Sincerely,\nChallenge Administration";
+      		}
+			sendMessage(rejectedUser, "Submission Scoring Failure", message);
+       	}
+       	
+       	for (String rejectedUser : overQuota.keySet()) {
+       		List<Date> rejectedTimeStamps = overQuota.get(rejectedUser);
+       		String message;
+       		if (rejectedTimeStamps.size()==1) {
+    			message = "Dear Participant:\nYour submission to Olfaction Prediction "+subChallengeString+", received on "+
+    					DF.format(rejectedTimeStamps.get(0))+", exceeds the submission limit of "+submissionQuota+
+   						".  If you have questions, please contact contact us.\n"+
+   						"Sincerely,\nChallenge Administration";
+   				
+     		} else {
+           		StringBuilder sb = new StringBuilder();
+           		boolean firstTime = true;
+           		for (Date d: rejectedTimeStamps) {
+           			if (firstTime) firstTime=false; else sb.append(", ");
+           			sb.append(DF.format(d));
+           		}
+           		message = "Dear Participant:\nYour submissions to Olfaction Prediction "+subChallengeString+", received on "+
+    					sb+", exceed the submission limit of "+submissionQuota+
+   						".  If you have questions, please contact contact us.\n"+
+   						"Sincerely,\nChallenge Administration";
+      		}
+			sendMessage(rejectedUser, "Submissions Exceed Quota", message);
+       	}
+       	
        	
        	System.out.println("Scored "+statusesToUpdate.size()+" submissions.");
        	long delta = System.currentTimeMillis() - startTime;
@@ -403,7 +528,7 @@ public class OlfactionChallengeScoring {
     		Annotations a, 
     		String alias,
     		long createOn,
-    		double score,
+    		Map<String,Double> metrics,
     		String description
     		) {
 		List<StringAnnotation> sas = a.getStringAnnos();
@@ -425,16 +550,21 @@ public class OlfactionChallengeScoring {
 			sa.setValue(description);
 			sas.add(sa);
 		}
-		DoubleAnnotation da = new DoubleAnnotation();
-		da.setIsPrivate(false);
-		da.setKey("Score");
-		da.setValue(score);
+		
+		
 		List<DoubleAnnotation> das = a.getDoubleAnnos();
 		if (das==null) {
 			das = new ArrayList<DoubleAnnotation>();
 			a.setDoubleAnnos(das);
 		}
-		das.add(da);
+		for (String metricName : metrics.keySet()) {
+			DoubleAnnotation da = new DoubleAnnotation();
+			da.setIsPrivate(false);
+			da.setKey(metricName);
+			da.setValue(metrics.get(metricName));
+			das.add(da);
+		}
+		
 		LongAnnotation la = new LongAnnotation();
 		la.setIsPrivate(false);
 		la.setKey("createdOnPublic");
