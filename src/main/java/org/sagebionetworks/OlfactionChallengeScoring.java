@@ -66,14 +66,12 @@ public class OlfactionChallengeScoring {
     
     
     private static final String[] SUB_CHALLENGE_1_METRICS = new String[]{"avg intensity", "avg valence", "avg 19 other", "avg of Z-scores"};
-    private static final int SUB_CHALLENGE_1_QUOTA = 2; //300;
+    private static final int SUB_CHALLENGE_1_QUOTA = 300;
     private static final String[] SUB_CHALLENGE_2_METRICS = new String[]{"intensity val" ,  "valence val" ,  "19 other val" , "intensity sigma" ,  "valence sigma" ,  "19 other sigma", "avg of Z-scores"};
-    private static final int SUB_CHALLENGE_2_QUOTA = 2; //30;
+    private static final int SUB_CHALLENGE_2_QUOTA = 30;
 
     public static void main( String[] args ) throws Exception {
    		OlfactionChallengeScoring sct = new OlfactionChallengeScoring();
-   		
-   		sct.checkLeaderBoard();
 
     	// validate and score subchallenge 1
 		sct.validate(SUBCHALLENGE.SUBCHALLENGE_1, "3154769");
