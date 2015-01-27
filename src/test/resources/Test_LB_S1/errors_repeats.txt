@@ -1,0 +1,4 @@
+NOT_OK
+You have the following error(s): 7409, 1 with INTENSITY/STRENGTH is a  duplicated entry. Error at input line # 14.
+
+Please see the template file and resubmit the updated file.

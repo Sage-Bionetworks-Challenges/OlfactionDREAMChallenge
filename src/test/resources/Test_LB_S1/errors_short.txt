@@ -1,0 +1,7 @@
+NOT_OK
+You have the following error(s): Missing predictions for 8038 1 BAKERY entry
+Missing predictions for 8048 1 BAKERY entry
+Missing predictions for 8051 1 BAKERY entry
+Missing predictions for 8078 1 BAKERY entry
+
+Please see the template file and  resubmit the updated file.
