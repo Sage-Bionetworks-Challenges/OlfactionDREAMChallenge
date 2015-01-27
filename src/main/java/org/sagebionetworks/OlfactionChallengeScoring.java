@@ -36,13 +36,22 @@ import org.sagebionetworks.repo.model.annotation.LongAnnotation;
 import org.sagebionetworks.repo.model.annotation.StringAnnotation;
 import org.sagebionetworks.repo.model.message.MessageToUser;
 
-import com.google.common.io.Files;
-
 
 /**
  * Olfaction scoring application
  * 
  */
+//
+// TODO add try-catch around each submission, so no submission breaks the app'
+//
+// TODO implement per-subchallenge limits (300 for SC1, 30 for SC2 in LB phase; 
+// TODO 1 and 1 for final phase; subsequent sub's are rejected)
+//
+// TODO implement 4 notifications:  (1) validation failure (include output of validation script), 
+// (2) exceeding submission limit, (3) scoring failure, (4) success
+//
+// TODO:  map scoring metrics to leader board
+// 
 public class OlfactionChallengeScoring {    
     // the page size can be bigger, we do this just to demonstrate pagination
     private static int PAGE_SIZE = 20;
@@ -62,9 +71,13 @@ public class OlfactionChallengeScoring {
     /*
      * NOTE: The returned file is a TEMPORARY file, slated for deletion when the process exits.
      */
-    public static File writeResourceToFile(String name) throws IOException {
-
-	    File result = File.createTempFile((new File(name)).getName(), "");
+    public static File writeResourceToFile(String name, File directory) throws IOException {
+    	File result;
+    	if (directory==null) {
+    		result =File.createTempFile((new File(name)).getName(), "");
+    	} else {
+    		result =File.createTempFile((new File(name)).getName(), "", directory);
+    	}
 	    result.deleteOnExit();
     	InputStream in = OlfactionChallengeScoring.class.getClassLoader().getResourceAsStream(name);
     	if (in==null) throw new IllegalArgumentException("Cannot find "+name+" on class path.");
@@ -88,19 +101,13 @@ public class OlfactionChallengeScoring {
      * @param inputFile: the input file for the script
      * @param params: the params to pass, after perl <script file> <inputFile> <output file>
      */
-    public static String executePerlScript(String name, File inputFile, String[] params) throws IOException {
-       	File scriptFile = writeResourceToFile(name);
-   	    File workingDirectory = scriptFile.getParentFile();
-   	    String outputFileName = "scriptOutput"+Math.abs(random.nextLong())+".txt";
-		File outputFile = new File(workingDirectory, outputFileName);
-		outputFile.deleteOnExit();
+    public static String executePerlScript(String name, String[] params, File outputFile, File workingDirectory) throws IOException {
+       	File scriptFile = writeResourceToFile(name, workingDirectory);
 		
-   	    String[] commandAndParams = new String[params.length+4];
+   	    String[] commandAndParams = new String[params.length+2];
    	    int i=0;
   	    commandAndParams[i++] = "perl";
   	    commandAndParams[i++] = scriptFile.getAbsolutePath();
-  	    commandAndParams[i++] = inputFile.getAbsolutePath();
-   	    commandAndParams[i++] = outputFileName;
    	    if (commandAndParams.length!=i+params.length) throw new IllegalStateException();
    	    System.arraycopy(params, 0, commandAndParams, i, params.length);
    	    String[] envp = new String[0];
@@ -154,7 +161,38 @@ public class OlfactionChallengeScoring {
 	    	throw new IllegalArgumentException(subchallenge.name());
 	    }
 	    if (!(phase.equals("L") || phase.equals("F"))) throw new IllegalArgumentException(phase);
-		return OlfactionChallengeScoring.executePerlScript(scriptName, inputFile, new String[]{phase});
+		File outputFile = File.createTempFile("scriptOutput", ".txt");//new File(workingDirectory, outputFileName);
+  	    //String outputFileName = "scriptOutput"+Math.abs(random.nextLong())+".txt";
+		outputFile.deleteOnExit();
+		File workingDirectory = outputFile.getParentFile();;
+	    // note, the validation file expects the input file PATH but the output file NAME
+ 		return OlfactionChallengeScoring.executePerlScript(scriptName, 
+ 				new String[]{inputFile.getAbsolutePath(), outputFile.getName(), phase}, outputFile, workingDirectory);
+    }
+    
+    public static String score(SUBCHALLENGE subchallenge, File inputFile, File goldStandard) throws IOException {
+	    String scriptName;
+	    
+	    switch (subchallenge) {
+	    case SUBCHALLENGE_1:
+	    	scriptName = "DREAM_Olfaction_scoring_Q1.pl";
+	    	break;
+	    case SUBCHALLENGE_2:
+	    	scriptName = "DREAM_Olfaction_scoring_Q2.pl";
+	    	break;
+	    default:
+	    	throw new IllegalArgumentException(subchallenge.name());
+	    }
+		File outputFile = File.createTempFile("scriptOutput", ".txt");//new File(workingDirectory, outputFileName);
+  	    //String outputFileName = "scriptOutput"+Math.abs(random.nextLong())+".txt";
+		outputFile.deleteOnExit();
+		File workingDirectory = outputFile.getParentFile();
+		if (!workingDirectory.getAbsolutePath().equals(inputFile.getParentFile().getAbsolutePath())) throw new RuntimeException();
+	    // NOTE: Perl script expects input file NAME, output file NAME (not PATH).  Both must be in working directory
+	    // However, gold standard is to be a file PATH
+		return OlfactionChallengeScoring.executePerlScript(scriptName, 
+				new String[]{inputFile.getName(), outputFile.getName(), 
+				goldStandard.getAbsolutePath()}, outputFile, workingDirectory);
     }
     
     public static void main( String[] args ) throws Exception {
@@ -168,7 +206,7 @@ public class OlfactionChallengeScoring {
     		sct.validate(SUBCHALLENGE.SUBCHALLENGE_2, "3154771");
        		sct.score(SUBCHALLENGE.SUBCHALLENGE_2, "3154771");
        		
-       		// TODO for final round, just zip up submitted files for manual scoring
+       		// TODO for final round, do we just zip up submitted files for manual scoring?
    	} finally {
     	}
     }
@@ -202,8 +240,9 @@ public class OlfactionChallengeScoring {
         		SubmissionBundle bundle = page.get(i);
         		Submission sub = bundle.getSubmission();
        			File temp = downloadSubmissionFile(sub);
-       			// TODO Examine file to decide whether the submission is valid
-       			boolean fileIsOK = true;
+       			temp.deleteOnExit();
+       			String validationResult = validate(subchallenge,temp, "L"/*"leader board" phase*/);
+       			boolean fileIsOK = !validationResult.contains("NOT_OK");
        			
        			SubmissionStatusEnum newStatus = null;
        			if (fileIsOK) {
@@ -211,9 +250,8 @@ public class OlfactionChallengeScoring {
        			} else {
        				newStatus = SubmissionStatusEnum.INVALID;
        				// send the user an email message to let them know
-       				// TODO include the detailed error information from the Perl script
        				// TODO in the message be clear about which sub challenge the submission was sent to
-       				sendMessage(sub.getUserId(), SUB_ACK_SUBJECT, SUB_ACK_INVALID);
+       				sendMessage(sub.getUserId(), SUB_ACK_SUBJECT, SUB_ACK_INVALID+"\n"+validationResult);
        			}
            		SubmissionStatus status = bundle.getSubmissionStatus();
            		status.setStatus(newStatus);
@@ -244,6 +282,7 @@ public class OlfactionChallengeScoring {
     	long startTime = System.currentTimeMillis();
     	List<SubmissionStatus> statusesToUpdate = new ArrayList<SubmissionStatus>();
     	long total = Integer.MAX_VALUE;
+    	File goldStandard = null;
        	for (int offset=0; offset<total; offset+=PAGE_SIZE) {
        		PaginatedResults<SubmissionBundle> submissionPGs = null;
        		// alternatively just get the unscored submissions in the Evaluation
@@ -256,20 +295,29 @@ public class OlfactionChallengeScoring {
         		Submission sub = bundle.getSubmission();
         		// at least once, download file and make sure it's correct
     			File temp = downloadSubmissionFile(sub);
-    			// TODO pass 'temp' to the Perl script for scoring
+    			if (goldStandard==null) {
+    				goldStandard = File.createTempFile("goldStd", ".txt");
+    				goldStandard.deleteOnExit();
+    				synapseAdmin.downloadFromFileEntityCurrentVersion(getProperty("GS_ENTITY_ID_L_"+subchallenge), goldStandard);
+    			}
+    			
+        		double score = 0d;
         		SubmissionStatus status = bundle.getSubmissionStatus();
-        		SubmissionStatusEnum currentStatus = status.getStatus();
-        		if (currentStatus.equals(SubmissionStatusEnum.SCORED)) {
-        			// A scorer can filter out submissions which are already scored, are invalid, etc.
+        		try {
+    				String s = score(subchallenge, temp, goldStandard);
+    				// TODO map all output values from the script into submission annotations
+           			status.setStatus(SubmissionStatusEnum.SCORED);
+           			score = 100d;
+        		} catch (Exception e) {
+           			status.setStatus(SubmissionStatusEnum.REJECTED);
+           			score = 0d;
         		}
+
         		Annotations annotations = status.getAnnotations();
         		if (annotations==null) {
         			annotations=new Annotations();
         			status.setAnnotations(annotations);
         		}
-        		// get the score from the Perl script to the annotations
-        		double score = 100d;
-       			status.setStatus(SubmissionStatusEnum.SCORED);
        		    addAnnotations(
     					annotations, 
     					sub.getSubmitterAlias(),
