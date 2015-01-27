@@ -1,7 +1,0 @@
-NOT_OK
-You have the following error(s): Missing predictions for 1030 1 INTENSITY/STRENGTH entry
-Missing predictions for 1060 1 INTENSITY/STRENGTH entry
-Missing predictions for 2682 1 INTENSITY/STRENGTH entry
-Missing predictions for 6137 1 INTENSITY/STRENGTH entry
-
-Please see the template file and  resubmit the updated file.

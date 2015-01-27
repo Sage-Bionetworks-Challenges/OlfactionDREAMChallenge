@@ -1,5 +1,0 @@
-NOT_OK
-You have the following error(s): Value must be a positive float number, less or equal to 100. Got -28, which is incorrect.
-Error at input line # 5.
-
-Please see the template file and resubmit the updated file.

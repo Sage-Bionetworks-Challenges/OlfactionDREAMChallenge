@@ -1,4 +1,0 @@
-NOT_OK
-You have the following error(s): 2682, 1 with INTENSITY/STRENGTH is a  duplicated entry. Error at input line # 8.
-
-Please see the template file and resubmit the updated file.
