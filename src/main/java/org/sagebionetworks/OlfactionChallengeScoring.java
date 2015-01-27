@@ -2,11 +2,11 @@ package org.sagebionetworks;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.io.UnsupportedEncodingException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -24,7 +24,6 @@ import org.sagebionetworks.client.SynapseProfileProxy;
 import org.sagebionetworks.client.exceptions.SynapseConflictingUpdateException;
 import org.sagebionetworks.client.exceptions.SynapseException;
 import org.sagebionetworks.evaluation.model.BatchUploadResponse;
-import org.sagebionetworks.evaluation.model.Evaluation;
 import org.sagebionetworks.evaluation.model.Submission;
 import org.sagebionetworks.evaluation.model.SubmissionBundle;
 import org.sagebionetworks.evaluation.model.SubmissionStatus;
@@ -51,19 +50,27 @@ public class OlfactionChallengeScoring {
     // the batch size can be bigger, we do this just to demonstrate batching
     private static int BATCH_SIZE = 20;
         
-	private static final Random random = new Random();
-	
 	private static Properties properties = null;
 
     private SynapseClient synapseAdmin;
     
+    public enum SUBCHALLENGE {
+    	SUBCHALLENGE_1,
+    	SUBCHALLENGE_2
+    }
+    
+    /*
+     * NOTE: The returned file is a TEMPORARY file, slated for deletion when the process exits.
+     */
+    public static File writeResourceToFile(String name) throws IOException {
 
-    private static String executePerlScript(String name, String[] params) throws IOException {
-	    File scriptFile = File.createTempFile(name, ".pl");
+	    File result = File.createTempFile((new File(name)).getName(), "");
+	    result.deleteOnExit();
     	InputStream in = OlfactionChallengeScoring.class.getClassLoader().getResourceAsStream(name);
+    	if (in==null) throw new IllegalArgumentException("Cannot find "+name+" on class path.");
    		OutputStream out = null;
    	    try {
-   	    	out = new FileOutputStream(scriptFile);
+   	    	out = new FileOutputStream(result);
     		IOUtils.copy(in, out);
     		out.close();
     		out = null;
@@ -71,11 +78,32 @@ public class OlfactionChallengeScoring {
     		in.close();
     		if (out!=null) out.close();
     	}
-   	    String[] commandAndParams = new String[params.length+1];
-   	    commandAndParams[0] = "perl "+scriptFile.getAbsolutePath();
-   	    System.arraycopy(params, 0, commandAndParams, 1, params.length);
+    	return result;
+    }
+    
+    private static Random random = new Random();
+
+    /*
+     * @param name:  the file name in src/main/resources
+     * @param inputFile: the input file for the script
+     * @param params: the params to pass, after perl <script file> <inputFile> <output file>
+     */
+    public static String executePerlScript(String name, File inputFile, String[] params) throws IOException {
+       	File scriptFile = writeResourceToFile(name);
+   	    File workingDirectory = scriptFile.getParentFile();
+   	    String outputFileName = "scriptOutput"+Math.abs(random.nextLong())+".txt";
+		File outputFile = new File(workingDirectory, outputFileName);
+		outputFile.deleteOnExit();
+		
+   	    String[] commandAndParams = new String[params.length+4];
+   	    int i=0;
+  	    commandAndParams[i++] = "perl";
+  	    commandAndParams[i++] = scriptFile.getAbsolutePath();
+  	    commandAndParams[i++] = inputFile.getAbsolutePath();
+   	    commandAndParams[i++] = outputFileName;
+   	    if (commandAndParams.length!=i+params.length) throw new IllegalStateException();
+   	    System.arraycopy(params, 0, commandAndParams, i, params.length);
    	    String[] envp = new String[0];
-   	    File workingDirectory = Files.createTempDir();
    	    Process process = Runtime.getRuntime().exec(commandAndParams, envp, workingDirectory);
    	    try {
    	    	process.waitFor();
@@ -84,7 +112,7 @@ public class OlfactionChallengeScoring {
    	    }
    	    int exitValue = process.exitValue();
    	    ByteArrayOutputStream resultOS = new ByteArrayOutputStream();
-   	    String result = null;
+   	    String output = null;
    	    try {
    	    	if (exitValue==0) {
    	    		IOUtils.copy(process.getInputStream(), resultOS);
@@ -92,14 +120,41 @@ public class OlfactionChallengeScoring {
   	    		IOUtils.copy(process.getErrorStream(), resultOS);
    	    	}
    	    	resultOS.close();
-   	    	result = new String(resultOS.toByteArray(), "UTF-8");
+   	    	output = new String(resultOS.toByteArray(), "UTF-8");
    	    } finally {
    	    	if (resultOS!=null) resultOS.close();
    	    }
    	    if (exitValue!=0) {
-   	    	throw new RuntimeException(result);
+   	    	throw new RuntimeException(output);
    	    }
-   	    return result;
+   	    
+		System.out.println(output);
+		String result;
+		FileInputStream fis = new FileInputStream(outputFile);
+		try {
+			result =  IOUtils.toString(fis);
+		} finally {
+			fis.close();
+		}
+		return result;
+    }
+    
+    public static String validate(SUBCHALLENGE subchallenge, File inputFile, String phase) throws IOException {
+		// USAGE:perl DREAM_Olfactory_S1_validation.pl  <input file to validate> <output file> <flag L for Leaderboard or F for final submission>  
+	    String scriptName;
+	    
+	    switch (subchallenge) {
+	    case SUBCHALLENGE_1:
+	    	scriptName = "DREAM_Olfactory_S1_validation.pl";
+	    	break;
+	    case SUBCHALLENGE_2:
+	    	scriptName = "DREAM_Olfactory_S2_validation.pl";
+	    	break;
+	    default:
+	    	throw new IllegalArgumentException(subchallenge.name());
+	    }
+	    if (!(phase.equals("L") || phase.equals("F"))) throw new IllegalArgumentException(phase);
+		return OlfactionChallengeScoring.executePerlScript(scriptName, inputFile, new String[]{phase});
     }
     
     public static void main( String[] args ) throws Exception {
@@ -123,11 +178,6 @@ public class OlfactionChallengeScoring {
     	String adminUserName = getProperty("ADMIN_USERNAME");
     	String adminPassword = getProperty("ADMIN_PASSWORD");
     	synapseAdmin.login(adminUserName, adminPassword);
-    }
-    
-    enum SUBCHALLENGE {
-    	SUBCHALLENGE_1,
-    	SUBCHALLENGE_2
     }
     
     /**
