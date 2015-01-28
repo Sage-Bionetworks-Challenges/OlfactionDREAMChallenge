@@ -106,5 +106,4 @@ public class TestPerlIntegration {
 		result = OlfactionChallengeScoring.score(OlfactionChallengeScoring.SUBCHALLENGE.SUBCHALLENGE_2, inputFile, goldStandardFile);
 		assertEquals(7, result.size());
 	}
-
 }

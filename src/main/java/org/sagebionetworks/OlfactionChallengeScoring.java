@@ -54,7 +54,7 @@ public class OlfactionChallengeScoring {
     
     // the batch size can be bigger, we do this just to demonstrate batching
     private static int BATCH_SIZE = 20;
-        
+    
 	private static Properties properties = null;
 
     private SynapseClient synapseAdmin;
@@ -522,7 +522,10 @@ public class OlfactionChallengeScoring {
         return String.format("%02dh:%02dm:%02d.%03ds", hr, min, sec, ms);
     }
     
-    private static void addAnnotations(
+    // will round numerical annotations.  ROUND = 10^(number of figures past decimal)
+	private static double ROUND = 1000;
+   
+	private static void addAnnotations(
     		Annotations a, 
     		String alias,
     		long createOn,
@@ -559,7 +562,8 @@ public class OlfactionChallengeScoring {
 			DoubleAnnotation da = new DoubleAnnotation();
 			da.setIsPrivate(false);
 			da.setKey(metricName);
-			da.setValue(metrics.get(metricName));
+			double rounded = (double)Math.round(metrics.get(metricName)*ROUND)/(double)ROUND;
+			da.setValue(rounded);
 			das.add(da);
 		}
 		
