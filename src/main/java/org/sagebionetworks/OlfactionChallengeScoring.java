@@ -65,9 +65,9 @@ public class OlfactionChallengeScoring {
     }
     
     
-    private static final String[] SUB_CHALLENGE_1_METRICS = new String[]{"avg intensity", "avg valence", "avg 19 other", "avg of Z-scores"};
+    private static final String[] SUB_CHALLENGE_1_METRICS = new String[]{"avgintensity", "avgvalence", "avg19other", "avgofZ-scores"};
     private static final int SUB_CHALLENGE_1_QUOTA = 300;
-    private static final String[] SUB_CHALLENGE_2_METRICS = new String[]{"intensity val" ,  "valence val" ,  "19 other val" , "intensity sigma" ,  "valence sigma" ,  "19 other sigma", "avg of Z-scores"};
+    private static final String[] SUB_CHALLENGE_2_METRICS = new String[]{"intensityval" ,  "valenceval" ,  "19otherval" , "intensitysigma" ,  "valencesigma" ,  "19othersigma", "avgofZ-scores"};
     private static final int SUB_CHALLENGE_2_QUOTA = 30;
 
     public static void main( String[] args ) throws Exception {
@@ -226,8 +226,9 @@ public class OlfactionChallengeScoring {
 		if (header.length!=metrics.length) throw new 
 			RuntimeException("Expected "+metrics.length+" metrics but found "+header.length);
 		for (int i=0; i<header.length; i++) {
-			if (!header[i].trim().equalsIgnoreCase(metrics[i])) throw new 
-			RuntimeException("Expected "+metrics[i]+" but found "+header[i]);
+			String headerNoWS = header[i].trim().replaceAll("\\s+","");
+			if (!headerNoWS.equalsIgnoreCase(metrics[i])) throw new 
+					RuntimeException("Expected "+metrics[i]+" but found "+headerNoWS);
 		}
 		String[] valueStrings = lines[1].split("\t");
 		if (valueStrings.length!=metrics.length) throw new 

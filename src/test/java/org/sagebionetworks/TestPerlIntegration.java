@@ -12,7 +12,7 @@ import org.junit.Test;
 
 public class TestPerlIntegration {
 	
-	private static final boolean VERBOSE = true;
+	private static final boolean VERBOSE = false;
 	
 	private static void o(Object s) {if (VERBOSE) System.out.println(s);}
 
