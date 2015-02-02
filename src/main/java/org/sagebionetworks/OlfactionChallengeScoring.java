@@ -11,7 +11,6 @@ import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -263,15 +262,18 @@ public class OlfactionChallengeScoring {
      * permitted in a given time period
      * 
      * @throws SynapseException
+     * @throws JSONException 
      */
-    public void validate(SUBCHALLENGE subchallenge, String evaluationId) throws SynapseException, IOException {
+    public void validate(SUBCHALLENGE subchallenge, String evaluationId) throws SynapseException, IOException, JSONException {
     	List<SubmissionStatus> statusesToUpdate = new ArrayList<SubmissionStatus>();
     	long total = Integer.MAX_VALUE;
+    	int accepted = 0;
+    	int rejected = 0;
 		String subChallengeString = subchallenge==SUBCHALLENGE.SUBCHALLENGE_1 ? "Sub-Challenge 1": "Sub-Challenge 2";
        	for (int offset=0; offset<total; offset+=PAGE_SIZE) {
        			// get the newly RECEIVED Submissions
        		PaginatedResults<SubmissionBundle> submissionPGs = 
-       			synapseAdmin.getAllSubmissionBundlesByStatus(evaluationId, SubmissionStatusEnum.RECEIVED, offset, PAGE_SIZE);
+           		synapseAdmin.getAllSubmissionBundlesByStatus(evaluationId, SubmissionStatusEnum.RECEIVED, offset, PAGE_SIZE);
         	total = (int)submissionPGs.getTotalNumberOfResults();
         	List<SubmissionBundle> page = submissionPGs.getResults();
         	for (int i=0; i<page.size(); i++) {
@@ -292,13 +294,16 @@ public class OlfactionChallengeScoring {
        			SubmissionStatusEnum newStatus = null;
        			if (fileIsOK) {
        				newStatus = SubmissionStatusEnum.VALIDATED;
+       				accepted++;
        			} else {
        				newStatus = SubmissionStatusEnum.INVALID;
        				// send the user an email message to let them know
-       				sendMessage(sub.getUserId(), "Submission Failure", 
-       						"Dear Participant:\nYour submission to  Olfaction "+subChallengeString+", received on "+
-       						DF.format(sub.getCreatedOn())+", was invalid.  Please try again.  Details are given below.\n"+
+       				sendMessage(sub.getUserId(), "DREAM Olfaction Prediction Challenge: Submission Failure", 
+       						"Dear Participant:\nYour submission to  Olfaction "+subChallengeString+", "+
+       						submissionDescriptor(sub)+
+       						", was invalid.  Please try again.  Details are given below.\n"+
        						"Sincerely,\nChallenge Administration\n\n"+validationResult);
+       				rejected++;
        			}
            		SubmissionStatus status = bundle.getSubmissionStatus();
            		status.setStatus(newStatus);
@@ -307,6 +312,27 @@ public class OlfactionChallengeScoring {
        	}
        	// we can update all the statuses in a batch
        	updateSubmissionStatusBatch(evaluationId, statusesToUpdate);
+       	System.out.println(subchallenge+": Retrieved "+total+
+       			" submissions for validation. Accepted "+accepted+
+       			" and rejected "+rejected+".");
+    }
+    
+    private static String submissionDescriptor(Submission sub) {
+    	StringBuilder sb = new StringBuilder();
+    	sb.append(getEntityNameFromBundle(sub.getEntityBundleJSON()));
+    	sb.append(", received on, ");
+    	sb.append(DF.format(sub.getCreatedOn()));
+    	return sb.toString();
+    }
+    
+    public static String getEntityNameFromBundle(String bundle) {
+    	try {
+				JSONObject jsonBundle = new JSONObject(bundle);
+				JSONObject jsonEntity = (JSONObject)jsonBundle.get("entity");
+				return (String)jsonEntity.get("name");
+    	} catch (JSONException e) {
+    		throw new RuntimeException(e);
+    	}
     }
        
     private void sendMessage(String userId, String subject, String body) throws SynapseException {
@@ -334,8 +360,8 @@ public class OlfactionChallengeScoring {
     	long total = Integer.MAX_VALUE;
     	File goldStandard = null;
     	Map<String,Integer> submissionsPerUser = new HashMap<String,Integer>();
-       	Map<String,List<Date>> overQuota = new HashMap<String,List<Date>>();
-       	Map<String,List<Date>> scoringFailed = new HashMap<String,List<Date>>();
+       	Map<String,List<String>> overQuota = new HashMap<String,List<String>>();
+       	Map<String,List<String>> scoringFailed = new HashMap<String,List<String>>();
           		String subChallengeString = subchallenge==SUBCHALLENGE.SUBCHALLENGE_1 ? "Sub-Challenge 1": "Sub-Challenge 2";
        	for (int offset=0; offset<total; offset+=PAGE_SIZE) {
        		PaginatedResults<SubmissionBundle> submissionPGs = null;
@@ -356,12 +382,12 @@ public class OlfactionChallengeScoring {
         			submissionsPerUser.put(sub.getUserId(), submissionCount);
         		}
          		if (submissionCount>=submissionQuota) {
-           			List<Date> overQuotaList = overQuota.get(sub.getUserId());
+           			List<String> overQuotaList = overQuota.get(sub.getUserId());
            			if (overQuotaList==null) {
-           				overQuotaList = new ArrayList<Date>();
+           				overQuotaList = new ArrayList<String>();
            				overQuota.put(sub.getUserId(), overQuotaList);
            			}
-           			overQuotaList.add(sub.getCreatedOn());
+           			overQuotaList.add(submissionDescriptor(sub));
          			status.setStatus(SubmissionStatusEnum.REJECTED);
           			statusesToUpdate.add(status);
       				continue;
@@ -381,12 +407,12 @@ public class OlfactionChallengeScoring {
            			submissionsPerUser.put(sub.getUserId(), submissionCount+1);
         		} catch (Exception e) {
            			status.setStatus(SubmissionStatusEnum.REJECTED);
-           			List<Date> rejectedList = scoringFailed.get(sub.getUserId());
+           			List<String> rejectedList = scoringFailed.get(sub.getUserId());
            			if (rejectedList==null) {
-           				rejectedList = new ArrayList<Date>();
+           				rejectedList = new ArrayList<String>();
            				scoringFailed.put(sub.getUserId(), rejectedList);
            			}
-           			rejectedList.add(sub.getCreatedOn());
+           			rejectedList.add(submissionDescriptor(sub));
            			metrics = new HashMap<String,Double>();
         		}
 
@@ -406,60 +432,60 @@ public class OlfactionChallengeScoring {
         	}
        	}
        	
-       	System.out.println("Retrieved "+total+" submissions for scoring.");
+       	System.out.println(subchallenge+": Retrieved "+total+" submissions for scoring.");
        	
        	updateSubmissionStatusBatch(evaluationId, statusesToUpdate);
        	
        	
        	for (String rejectedUser : scoringFailed.keySet()) {
-       		List<Date> rejectedTimeStamps = scoringFailed.get(rejectedUser);
+       		List<String> rejectedDescriptors = scoringFailed.get(rejectedUser);
        		String message;
-       		if (rejectedTimeStamps.size()==1) {
-    			message = "Dear Participant:\nYour submission to Olfaction Prediction "+subChallengeString+", received on "+
-   						DF.format(rejectedTimeStamps.get(0))+", was rejected.  Please try again or contact us for help.\n"+
+       		if (rejectedDescriptors.size()==1) {
+    			message = "Dear Participant:\nYour submission to Olfaction Prediction "+subChallengeString+", "+
+   						rejectedDescriptors.get(0)+", was rejected.  Please try again or contact us for help.\n"+
    						"Sincerely,\nChallenge Administration";
       		} else {
            		StringBuilder sb = new StringBuilder();
            		boolean firstTime = true;
-           		for (Date d: rejectedTimeStamps) {
+           		for (String d: rejectedDescriptors) {
            			if (firstTime) firstTime=false; else sb.append(", ");
-           			sb.append(DF.format(d));
+           			sb.append(d);
            		}
-           		message = "Dear Participant:\nYour submissions to Olfaction Prediction "+subChallengeString+", received on "+
+           		message = "Dear Participant:\nYour submissions to Olfaction Prediction "+subChallengeString+", "+
    						sb+", were rejected.  Please try again or contact us for help.\n"+
    						"Sincerely,\nChallenge Administration";
       		}
-			sendMessage(rejectedUser, "Submission Scoring Failure", message);
+			sendMessage(rejectedUser, "DREAM Olfaction Prediction Challenge: Submission Scoring Failure", message);
        	}
        	
        	for (String rejectedUser : overQuota.keySet()) {
-       		List<Date> rejectedTimeStamps = overQuota.get(rejectedUser);
+       		List<String> rejectedDescriptors = overQuota.get(rejectedUser);
        		String message;
-       		if (rejectedTimeStamps.size()==1) {
-    			message = "Dear Participant:\nYour submission to Olfaction Prediction "+subChallengeString+", received on "+
-    					DF.format(rejectedTimeStamps.get(0))+", exceeds the submission limit of "+submissionQuota+
+       		if (rejectedDescriptors.size()==1) {
+    			message = "Dear Participant:\nYour submission to Olfaction Prediction "+subChallengeString+", "+
+    					rejectedDescriptors.get(0)+", exceeds the submission limit of "+submissionQuota+
    						".  If you have questions, please contact contact us.\n"+
    						"Sincerely,\nChallenge Administration";
    				
      		} else {
            		StringBuilder sb = new StringBuilder();
            		boolean firstTime = true;
-           		for (Date d: rejectedTimeStamps) {
+           		for (String d: rejectedDescriptors) {
            			if (firstTime) firstTime=false; else sb.append(", ");
-           			sb.append(DF.format(d));
+           			sb.append(d);
            		}
-           		message = "Dear Participant:\nYour submissions to Olfaction Prediction "+subChallengeString+", received on "+
+           		message = "Dear Participant:\nYour submissions to Olfaction Prediction "+subChallengeString+", "+
     					sb+", exceed the submission limit of "+submissionQuota+
    						".  If you have questions, please contact contact us.\n"+
    						"Sincerely,\nChallenge Administration";
       		}
-			sendMessage(rejectedUser, "Submissions Exceed Quota", message);
+			sendMessage(rejectedUser, "DREAM Olfaction Prediction Challenge: Submissions Exceed Quota", message);
        	}
        	
        	
-       	System.out.println("Scored "+statusesToUpdate.size()+" submissions.");
+       	System.out.println("\tScored "+statusesToUpdate.size()+" submissions.");
        	long delta = System.currentTimeMillis() - startTime;
-       	System.out.println("Elapsed time for running scoring app: "+formatInterval(delta));
+       	System.out.println("\tElapsed time for running scoring app: "+formatInterval(delta)+"\n");
     }
     
     private static final int BATCH_UPLOAD_RETRY_COUNT = 3;
