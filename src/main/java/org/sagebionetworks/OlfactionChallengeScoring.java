@@ -33,6 +33,7 @@ import org.sagebionetworks.evaluation.model.SubmissionStatus;
 import org.sagebionetworks.evaluation.model.SubmissionStatusBatch;
 import org.sagebionetworks.evaluation.model.SubmissionStatusEnum;
 import org.sagebionetworks.repo.model.PaginatedResults;
+import org.sagebionetworks.repo.model.annotation.AnnotationBase;
 import org.sagebionetworks.repo.model.annotation.Annotations;
 import org.sagebionetworks.repo.model.annotation.DoubleAnnotation;
 import org.sagebionetworks.repo.model.annotation.LongAnnotation;
@@ -48,6 +49,10 @@ import org.sagebionetworks.repo.model.query.Row;
  */
 // 
 public class OlfactionChallengeScoring {    
+	// when 'rescore' is true we (1) score the submissions which are already scored,
+	// (2) don't send email
+	private static final boolean RESCORE = false;
+	
     // the page size can be bigger, we do this just to demonstrate pagination
     private static int PAGE_SIZE = 20;
     
@@ -68,6 +73,10 @@ public class OlfactionChallengeScoring {
     private static final int SUB_CHALLENGE_1_QUOTA = 300;
     private static final String[] SUB_CHALLENGE_2_METRICS = new String[]{"intensityval" ,  "valenceval" ,  "19otherval" , "intensitysigma" ,  "valencesigma" ,  "19othersigma", "avgofZ-scores"};
     private static final int SUB_CHALLENGE_2_QUOTA = 30;
+    
+    // this allows us to recompute with updated gold standard prior
+    // rather than overwriting the original 
+    private static final String ANNOTATION_PREFIX = "V2_";
 
     public static void main( String[] args ) throws Exception {
    		OlfactionChallengeScoring sct = new OlfactionChallengeScoring();
@@ -161,7 +170,6 @@ public class OlfactionChallengeScoring {
    	    	throw new RuntimeException(output);
    	    }
    	    
-		System.out.println(output);
 		String result;
 		FileInputStream fis = new FileInputStream(outputFile);
 		try {
@@ -213,7 +221,8 @@ public class OlfactionChallengeScoring {
 		File outputFile = File.createTempFile("scriptOutput", ".txt");
 		outputFile.deleteOnExit();
 		File workingDirectory = outputFile.getParentFile();
-		if (!workingDirectory.getAbsolutePath().equals(inputFile.getParentFile().getAbsolutePath())) throw new RuntimeException();
+		if (!workingDirectory.getAbsolutePath().equals(inputFile.getParentFile().getAbsolutePath())) 
+			throw new RuntimeException("Input file must be in :"+workingDirectory.getAbsolutePath());
 	    // NOTE: Perl script expects input file NAME, output file NAME (not PATH).  Both must be in working directory
 	    // However, gold standard is to be a file PATH
 		String scriptOutput = OlfactionChallengeScoring.executePerlScript(scriptName, 
@@ -336,10 +345,14 @@ public class OlfactionChallengeScoring {
     }
        
     private void sendMessage(String userId, String subject, String body) throws SynapseException {
-    	MessageToUser messageMetadata = new MessageToUser();
-    	messageMetadata.setRecipients(Collections.singleton(userId));
-    	messageMetadata.setSubject(subject);
-    	synapseAdmin.sendStringMessage(messageMetadata, body);
+    	if (RESCORE) {
+        	System.out.println("Message to "+userId+" "+subject+" "+body+"\n");
+    	} else {
+	    	MessageToUser messageMetadata = new MessageToUser();
+	    	messageMetadata.setRecipients(Collections.singleton(userId));
+	    	messageMetadata.setSubject(subject);
+	    	synapseAdmin.sendStringMessage(messageMetadata, body);
+    	}
     }
     
     private int getSubmissionCount(String userId, String evaluationId) throws SynapseException {
@@ -367,9 +380,16 @@ public class OlfactionChallengeScoring {
        		PaginatedResults<SubmissionBundle> submissionPGs = null;
        		// alternatively just get the unscored submissions in the Evaluation
        		// here we get the ones that the 'validation' step (above) marked as validated
-       		submissionPGs = synapseAdmin.getAllSubmissionBundlesByStatus(evaluationId, SubmissionStatusEnum.VALIDATED, offset, PAGE_SIZE);
+       		SubmissionStatusEnum submissionTypeToScore;
+       		if (RESCORE) {
+       			submissionTypeToScore = SubmissionStatusEnum.SCORED;
+       		} else {
+      			submissionTypeToScore = SubmissionStatusEnum.VALIDATED;
+      			        		}
+       		submissionPGs = synapseAdmin.getAllSubmissionBundlesByStatus(evaluationId, submissionTypeToScore, offset, PAGE_SIZE);
         	total = (int)submissionPGs.getTotalNumberOfResults();
         	List<SubmissionBundle> page = submissionPGs.getResults();
+       		System.out.println("score: offset: "+offset+", total: "+total+", this page: "+page.size());
         	for (int i=0; i<page.size(); i++) {
         		SubmissionBundle bundle = page.get(i);
         		Submission sub = bundle.getSubmission();
@@ -510,10 +530,12 @@ public class OlfactionChallengeScoring {
 		       		BatchUploadResponse response = 
 		       				synapseAdmin.updateSubmissionStatusBatch(evaluationId, updateBatch);
 		       		batchToken = response.getNextUploadToken();
+		       		System.out.println("Successfully updated "+batch.size()+" submissions.");
 		       	}
 		       	break; // success!
     		} catch (SynapseConflictingUpdateException e) {
     			// we collided with someone else access the Evaluation.  Will retry!
+    			System.out.println("WILL RETRY: "+e.getMessage());
     		}
     	}
     }
@@ -551,6 +573,25 @@ public class OlfactionChallengeScoring {
     
     // will round numerical annotations.  ROUND = 10^(number of figures past decimal)
 	private static double ROUND = 1000;
+
+	
+	private static <T extends AnnotationBase> void addOrUpdate(List<T> list, T annotation) {
+		for (T a : list) {
+			if (a.getKey().equals(annotation.getKey())) {
+				if (a instanceof StringAnnotation) {
+					((StringAnnotation)a).setValue(((StringAnnotation)annotation).getValue());
+				} else if (a instanceof DoubleAnnotation) {
+					((DoubleAnnotation)a).setValue(((DoubleAnnotation)annotation).getValue());
+				}else if (a instanceof LongAnnotation) {
+					((LongAnnotation)a).setValue(((LongAnnotation)annotation).getValue());
+				} else {
+					throw new RuntimeException("Unexpected type "+annotation.getClass());
+				}
+				return;
+			}
+		}
+		list.add(annotation);
+	}
    
 	private static void addAnnotations(
     		Annotations a, 
@@ -569,14 +610,14 @@ public class OlfactionChallengeScoring {
 			sa.setIsPrivate(false);
 			sa.setKey("Team");
 			sa.setValue(alias);
-			sas.add(sa);
+			addOrUpdate(sas, sa);
 		}
 		{
 			StringAnnotation sa = new StringAnnotation();
 			sa.setIsPrivate(false);
 			sa.setKey("Description");
 			sa.setValue(description);
-			sas.add(sa);
+			addOrUpdate(sas, sa);
 		}
 		
 		
@@ -588,10 +629,10 @@ public class OlfactionChallengeScoring {
 		for (String metricName : metrics.keySet()) {
 			DoubleAnnotation da = new DoubleAnnotation();
 			da.setIsPrivate(false);
-			da.setKey(metricName);
+			da.setKey(ANNOTATION_PREFIX+metricName);
 			double rounded = (double)Math.round(metrics.get(metricName)*ROUND)/(double)ROUND;
 			da.setValue(rounded);
-			das.add(da);
+			addOrUpdate(das, da);
 		}
 		
 		LongAnnotation la = new LongAnnotation();
@@ -602,8 +643,8 @@ public class OlfactionChallengeScoring {
 		if (las==null) {
 			las = new ArrayList<LongAnnotation>();
 			a.setLongAnnos(las);
-		}
-		las.add(la);   	
+		}  	
+		addOrUpdate(las, la);
     }
     
     
