@@ -49,6 +49,8 @@ import org.sagebionetworks.repo.model.query.Row;
  */
 // 
 public class OlfactionChallengeScoring {    
+	private static final boolean VERBOSE = true;
+	
 	// when 'rescore' is true we (1) score the submissions which are already scored,
 	// (2) don't send email
 	private static final boolean RESCORE = false;
@@ -77,17 +79,26 @@ public class OlfactionChallengeScoring {
     // this allows us to recompute with updated gold standard prior
     // rather than overwriting the original 
     private static final String ANNOTATION_PREFIX = "V2_";
+    
+    private static void o(Object s) {
+    	if (VERBOSE) System.out.println(s);
+    }
 
     public static void main( String[] args ) throws Exception {
    		OlfactionChallengeScoring sct = new OlfactionChallengeScoring();
 
     	// validate and score subchallenge 1
+   		
+   		o("Sub-challenge 1 validation.");
 		sct.validate(SUBCHALLENGE.SUBCHALLENGE_1, "3154769");
-   		sct.score(SUBCHALLENGE.SUBCHALLENGE_1, "3154769", SUB_CHALLENGE_1_QUOTA);
+  		o("Sub-challenge 1 scoring.");
+  		sct.score(SUBCHALLENGE.SUBCHALLENGE_1, "3154769", SUB_CHALLENGE_1_QUOTA);
    		
     	// validate and score subchallenge 2
+  		o("Sub-challenge 2 validation.");
 		sct.validate(SUBCHALLENGE.SUBCHALLENGE_2, "3154771");
-   		sct.score(SUBCHALLENGE.SUBCHALLENGE_2, "3154771", SUB_CHALLENGE_2_QUOTA);
+  		o("Sub-challenge 2 scoring.");
+  		sct.score(SUBCHALLENGE.SUBCHALLENGE_2, "3154771", SUB_CHALLENGE_2_QUOTA);
    		
    		// TODO for final round, do we just zip up submitted files for manual scoring?
 
@@ -130,6 +141,8 @@ public class OlfactionChallengeScoring {
     	return result;
     }
     
+    private static final long MAX_SCRIPT_EXECUTION_TIME_MILLIS = 60000L;
+    
     /*
      * @param name:  the file name in src/main/resources
      * @param params: the params to pass, after perl <script file> 
@@ -147,12 +160,25 @@ public class OlfactionChallengeScoring {
    	    System.arraycopy(params, 0, commandAndParams, i, params.length);
    	    String[] envp = new String[0];
    	    Process process = Runtime.getRuntime().exec(commandAndParams, envp, workingDirectory);
-   	    try {
-   	    	process.waitFor();
-   	    } catch (InterruptedException e) {
-   	    	throw new RuntimeException(e);
+   	    int exitValue = -1;
+   	    long processStartTime = System.currentTimeMillis();
+   	    while (System.currentTimeMillis()-processStartTime<MAX_SCRIPT_EXECUTION_TIME_MILLIS) {
+   	    	try {
+   	    		exitValue = process.exitValue();
+   	    		break;
+   	    	} catch (IllegalThreadStateException e) {
+   	    		// not done yet
+   	    	}
+   	    	exitValue = -1;
+   	    	try {
+   	    		Thread.sleep(1000L);
+   	    	} catch (InterruptedException e) {
+   	    		throw new RuntimeException(e);
+   	    	}
    	    }
-   	    int exitValue = process.exitValue();
+   	    if (exitValue==-1 && System.currentTimeMillis()-processStartTime>=MAX_SCRIPT_EXECUTION_TIME_MILLIS) {
+   	    	throw new RuntimeException("Process exceeded alloted time.");
+   	    }
    	    ByteArrayOutputStream resultOS = new ByteArrayOutputStream();
    	    String output = null;
    	    try {
@@ -293,6 +319,7 @@ public class OlfactionChallengeScoring {
        			boolean fileIsOK = true;
        			String validationResult = "";
        			try {
+       				o("Validating submission: "+sub.getId());
        				validationResult = validate(subchallenge,temp, "L"/*"leader board" phase*/);
        				fileIsOK = !validationResult.contains("NOT_OK");
        			} catch (Exception e) {
@@ -422,6 +449,7 @@ public class OlfactionChallengeScoring {
     			}
     			Map<String,Double> metrics;
          		try {
+         			o("Scoring submission "+sub.getId());
         			metrics = score(subchallenge, temp, goldStandard);
            			status.setStatus(SubmissionStatusEnum.SCORED);
            			submissionsPerUser.put(sub.getUserId(), submissionCount+1);
