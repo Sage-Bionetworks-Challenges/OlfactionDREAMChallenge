@@ -136,7 +136,7 @@ if (!defined($individuals{$ind})) { $errors .= "$ind is not a valid individual i
  sub check_format_cols4{ #is numeric? is it between 0 and 100?
   my ($val,$ln) = @_;
  # if (( $val =~ /^([+-]?)(?=\d|\.\d)\d*(\.\d*)?([Ee]([+-]?\d+))?$/) && ($val >= 0) && ($val <= 1) || ($val == 1) || ($val==0)){
-  if (( $val =~ /^([+]?)(?=\d|\.\d)\d*(\.\d*)?([Ee]([+-]?\d+))?$/) && ($val <= 100) || ($val==0)){ #force to be positive
+  if (( $val =~ /^([+]?)(?=\d|\.\d)\d*(\.\d*)?([Ee]([+-]?\d+))?$/) && ($val <= 100)){ #force to be positive
        return(1);
    } #test ok;
    #test failed 
