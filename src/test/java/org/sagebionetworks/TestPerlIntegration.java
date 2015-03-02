@@ -74,7 +74,7 @@ public class TestPerlIntegration {
 		inputFile = OlfactionChallengeScoring.writeResourceToFile("Test_LB_S1/S1_InfiniteLoop.tsv", null);
 		result = OlfactionChallengeScoring.validate(OlfactionChallengeScoring.SUBCHALLENGE.SUBCHALLENGE_1, inputFile, "L");
 		o("\n====Test_LB_S1/S1_InfiniteLoop.tsv====\n"+result+"\n========\n");
-		assertFalse(result.contains("NOT_OK"));
+		assertTrue(result.contains("NOT_OK"));
 		
 	}
 
