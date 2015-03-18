@@ -33,6 +33,7 @@ import org.sagebionetworks.evaluation.model.SubmissionStatus;
 import org.sagebionetworks.evaluation.model.SubmissionStatusBatch;
 import org.sagebionetworks.evaluation.model.SubmissionStatusEnum;
 import org.sagebionetworks.repo.model.PaginatedResults;
+import org.sagebionetworks.repo.model.Team;
 import org.sagebionetworks.repo.model.annotation.AnnotationBase;
 import org.sagebionetworks.repo.model.annotation.Annotations;
 import org.sagebionetworks.repo.model.annotation.DoubleAnnotation;
@@ -402,8 +403,11 @@ public class OlfactionChallengeScoring {
     	Map<String,Integer> submissionsPerUser = new HashMap<String,Integer>();
        	Map<String,List<String>> overQuota = new HashMap<String,List<String>>();
        	Map<String,List<String>> scoringFailed = new HashMap<String,List<String>>();
-          		String subChallengeString = subchallenge==SUBCHALLENGE.SUBCHALLENGE_1 ? "Sub-Challenge 1": "Sub-Challenge 2";
-       	for (int offset=0; offset<total; offset+=PAGE_SIZE) {
+        String subChallengeString = subchallenge==SUBCHALLENGE.SUBCHALLENGE_1 ? "Sub-Challenge 1": "Sub-Challenge 2";
+          		
+        Map<String,String> teamNames = new HashMap<String,String>();
+        
+        for (int offset=0; offset<total; offset+=PAGE_SIZE) {
        		PaginatedResults<SubmissionBundle> submissionPGs = null;
        		// alternatively just get the unscored submissions in the Evaluation
        		// here we get the ones that the 'validation' step (above) marked as validated
@@ -463,15 +467,30 @@ public class OlfactionChallengeScoring {
            			rejectedList.add(submissionDescriptor(sub));
            			metrics = new HashMap<String,Double>();
         		}
+         		
+         		String teamNameOrSubmissionAlias = null;
+         		String teamId = sub.getTeamId();
+         		if (teamId!=null) {
+         			String teamName = teamNames.get(teamId);
+         			if (teamName==null) {
+         				Team team = synapseAdmin.getTeam(teamId);
+         				teamName = team.getName();
+         				teamNames.put(teamId, teamName);
+         			}
+         			teamNameOrSubmissionAlias = teamName;
+         		}
+         		if (teamNameOrSubmissionAlias==null) teamNameOrSubmissionAlias=sub.getSubmitterAlias();
+         		
 
         		Annotations annotations = status.getAnnotations();
         		if (annotations==null) {
         			annotations=new Annotations();
         			status.setAnnotations(annotations);
         		}
+        		
        		    addAnnotations(
     					annotations, 
-    					sub.getSubmitterAlias(),
+    					teamNameOrSubmissionAlias,
     					sub.getCreatedOn().getTime(),
     					metrics,
     					sub.getName()
