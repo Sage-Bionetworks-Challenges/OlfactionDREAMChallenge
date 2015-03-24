@@ -8,6 +8,7 @@ import java.util.Map;
 
 import org.junit.Before;
 import org.junit.Test;
+import org.sagebionetworks.OlfactionChallengeScoring.PHASE;
 
 
 public class TestPerlIntegration {
@@ -26,45 +27,58 @@ public class TestPerlIntegration {
 		String result;
 		
 		inputFile = OlfactionChallengeScoring.writeResourceToFile("Test_LB_S1/low_val.txt", null);
-		result = OlfactionChallengeScoring.validate(OlfactionChallengeScoring.SUBCHALLENGE.SUBCHALLENGE_1, inputFile, "L");
+		result = OlfactionChallengeScoring.validate(OlfactionChallengeScoring.SUBCHALLENGE.SUBCHALLENGE_1, inputFile, PHASE.L);
 		o("\n====Test_LB_S1/low_val.txt====\n"+result+"\n========\n");
 		assertTrue(result.contains("NOT_OK"));
 		
 		inputFile = OlfactionChallengeScoring.writeResourceToFile("Test_LB_S1/repeats.txt", null);
-		result = OlfactionChallengeScoring.validate(OlfactionChallengeScoring.SUBCHALLENGE.SUBCHALLENGE_1, inputFile, "L");
+		result = OlfactionChallengeScoring.validate(OlfactionChallengeScoring.SUBCHALLENGE.SUBCHALLENGE_1, inputFile, PHASE.L);
 		o("\n========\n"+result+"\n========\n");
 		assertTrue(result.contains("NOT_OK"));
 		
 		inputFile = OlfactionChallengeScoring.writeResourceToFile("Test_LB_S1/short.txt", null);
-		result = OlfactionChallengeScoring.validate(OlfactionChallengeScoring.SUBCHALLENGE.SUBCHALLENGE_1, inputFile, "L");
+		result = OlfactionChallengeScoring.validate(OlfactionChallengeScoring.SUBCHALLENGE.SUBCHALLENGE_1, inputFile, PHASE.L);
 		o("\n========\n"+result+"\n========\n");
 		assertTrue(result.contains("NOT_OK"));
 		
 		inputFile = OlfactionChallengeScoring.writeResourceToFile("Test_LB_S1/errors_low_val.txt", null);
-		result = OlfactionChallengeScoring.validate(OlfactionChallengeScoring.SUBCHALLENGE.SUBCHALLENGE_1, inputFile, "L");
+		result = OlfactionChallengeScoring.validate(OlfactionChallengeScoring.SUBCHALLENGE.SUBCHALLENGE_1, inputFile, PHASE.L);
 		o("\n========\n"+result+"\n========\n");
 		assertTrue(result.contains("NOT_OK"));
 		
 		inputFile = OlfactionChallengeScoring.writeResourceToFile("Test_LB_S1/errors_ok.txt", null);
-		result = OlfactionChallengeScoring.validate(OlfactionChallengeScoring.SUBCHALLENGE.SUBCHALLENGE_1, inputFile, "L");
+		result = OlfactionChallengeScoring.validate(OlfactionChallengeScoring.SUBCHALLENGE.SUBCHALLENGE_1, inputFile, PHASE.L);
 		o("\n========\n"+result+"\n========\n");
 		assertTrue(result.contains("NOT_OK"));
 		
 		inputFile = OlfactionChallengeScoring.writeResourceToFile("Test_LB_S1/errors_repeats.txt", null);
-		result = OlfactionChallengeScoring.validate(OlfactionChallengeScoring.SUBCHALLENGE.SUBCHALLENGE_1, inputFile, "L");
+		result = OlfactionChallengeScoring.validate(OlfactionChallengeScoring.SUBCHALLENGE.SUBCHALLENGE_1, inputFile, PHASE.L);
 		o("\n========\n"+result+"\n========\n");
 		assertTrue(result.contains("NOT_OK"));
 		
 		inputFile = OlfactionChallengeScoring.writeResourceToFile("Test_LB_S1/errors_short.txt", null);
-		result = OlfactionChallengeScoring.validate(OlfactionChallengeScoring.SUBCHALLENGE.SUBCHALLENGE_1, inputFile, "L");
+		result = OlfactionChallengeScoring.validate(OlfactionChallengeScoring.SUBCHALLENGE.SUBCHALLENGE_1, inputFile, PHASE.L);
 		o("\n========\n"+result+"\n========\n");
 		assertTrue(result.contains("NOT_OK"));
 		
 		inputFile = OlfactionChallengeScoring.writeResourceToFile("Test_LB_S1/test_ok.txt", null);
-		result = OlfactionChallengeScoring.validate(OlfactionChallengeScoring.SUBCHALLENGE.SUBCHALLENGE_1, inputFile, "L");
+		result = OlfactionChallengeScoring.validate(OlfactionChallengeScoring.SUBCHALLENGE.SUBCHALLENGE_1, inputFile, PHASE.L);
 		o("\n========\n"+result+"\n========\n");
 		assertFalse(result.contains("NOT_OK"));
 	}
+	
+	@Test
+	public void testSubchallenge1ValidationFINAL() throws Exception {
+		File inputFile;
+		String result;
+		
+		inputFile = OlfactionChallengeScoring.writeResourceToFile("Test_LB_S1/test_ok_FINAL.txt", null);
+		result = OlfactionChallengeScoring.validate(OlfactionChallengeScoring.SUBCHALLENGE.SUBCHALLENGE_1, inputFile, PHASE.F);
+		o("\n========\n"+result+"\n========\n");
+		assertFalse(result.contains("NOT_OK"));
+	}
+		
+
 	
 	@Test
 	public void testS1ValidationInfiniteLoop() throws Exception {
@@ -72,7 +86,7 @@ public class TestPerlIntegration {
 		String result;
 		
 		inputFile = OlfactionChallengeScoring.writeResourceToFile("Test_LB_S1/S1_InfiniteLoop.tsv", null);
-		result = OlfactionChallengeScoring.validate(OlfactionChallengeScoring.SUBCHALLENGE.SUBCHALLENGE_1, inputFile, "L");
+		result = OlfactionChallengeScoring.validate(OlfactionChallengeScoring.SUBCHALLENGE.SUBCHALLENGE_1, inputFile, PHASE.L);
 		o("\n====Test_LB_S1/S1_InfiniteLoop.tsv====\n"+result+"\n========\n");
 		assertTrue(result.contains("NOT_OK"));
 		
@@ -97,12 +111,23 @@ public class TestPerlIntegration {
 		String result;
 				
 		inputFile = OlfactionChallengeScoring.writeResourceToFile("Test_LB_S2/errors_LB_s2_ok.txt", null);
-		result = OlfactionChallengeScoring.validate(OlfactionChallengeScoring.SUBCHALLENGE.SUBCHALLENGE_2, inputFile, "L");
+		result = OlfactionChallengeScoring.validate(OlfactionChallengeScoring.SUBCHALLENGE.SUBCHALLENGE_2, inputFile, PHASE.L);
 		o("\n========\n"+result+"\n========\n");
 		assertTrue(result.contains("NOT_OK"));
 		
 		inputFile = OlfactionChallengeScoring.writeResourceToFile("Test_LB_S2/test_LB_s2_ok.txt", null);
-		result = OlfactionChallengeScoring.validate(OlfactionChallengeScoring.SUBCHALLENGE.SUBCHALLENGE_2, inputFile, "L");
+		result = OlfactionChallengeScoring.validate(OlfactionChallengeScoring.SUBCHALLENGE.SUBCHALLENGE_2, inputFile, PHASE.L);
+		o("\n========\n"+result+"\n========\n");
+		assertFalse(result.contains("NOT_OK"));
+	}
+
+	@Test
+	public void testSubchallenge2ValidationFINAL() throws Exception {
+		File inputFile;
+		String result;
+				
+		inputFile = OlfactionChallengeScoring.writeResourceToFile("Test_LB_S2/test_s2_ok_FINAL.txt", null);
+		result = OlfactionChallengeScoring.validate(OlfactionChallengeScoring.SUBCHALLENGE.SUBCHALLENGE_2, inputFile, PHASE.F);
 		o("\n========\n"+result+"\n========\n");
 		assertFalse(result.contains("NOT_OK"));
 	}

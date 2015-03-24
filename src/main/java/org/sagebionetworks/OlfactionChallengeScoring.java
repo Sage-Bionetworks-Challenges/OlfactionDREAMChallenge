@@ -7,6 +7,12 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.URI;
+import java.nio.file.FileSystem;
+import java.nio.file.FileSystems;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -32,6 +38,7 @@ import org.sagebionetworks.evaluation.model.SubmissionBundle;
 import org.sagebionetworks.evaluation.model.SubmissionStatus;
 import org.sagebionetworks.evaluation.model.SubmissionStatusBatch;
 import org.sagebionetworks.evaluation.model.SubmissionStatusEnum;
+import org.sagebionetworks.repo.model.FileEntity;
 import org.sagebionetworks.repo.model.PaginatedResults;
 import org.sagebionetworks.repo.model.Team;
 import org.sagebionetworks.repo.model.annotation.AnnotationBase;
@@ -39,11 +46,13 @@ import org.sagebionetworks.repo.model.annotation.Annotations;
 import org.sagebionetworks.repo.model.annotation.DoubleAnnotation;
 import org.sagebionetworks.repo.model.annotation.LongAnnotation;
 import org.sagebionetworks.repo.model.annotation.StringAnnotation;
+import org.sagebionetworks.repo.model.file.FileHandle;
+import org.sagebionetworks.repo.model.file.FileHandleResults;
 import org.sagebionetworks.repo.model.message.MessageToUser;
 import org.sagebionetworks.repo.model.query.QueryTableResults;
 import org.sagebionetworks.repo.model.query.Row;
-
-
+import org.sagebionetworks.schema.adapter.JSONObjectAdapterException;
+import org.sagebionetworks.util.Pair;
 /**
  * Olfaction scoring application
  * 
@@ -71,6 +80,23 @@ public class OlfactionChallengeScoring {
     	SUBCHALLENGE_2
     }
     
+    public enum PHASE {
+    	L, // "Leaderboard"
+    	F  // "Final"
+    }
+    
+    private static final File TEMP_DIR;
+    
+    static {
+    	try {
+    		TEMP_DIR = Files.createTempDirectory("tmp").toFile();
+    	} catch (IOException e) {
+    		throw new RuntimeException(e);
+    	}
+    }
+    
+
+    
     
     private static final String[] SUB_CHALLENGE_1_METRICS = new String[]{"avgintensity", "avgvalence", "avg19other", "avgofZ-scores"};
     private static final int SUB_CHALLENGE_1_QUOTA = 300;
@@ -89,20 +115,29 @@ public class OlfactionChallengeScoring {
    		OlfactionChallengeScoring sct = new OlfactionChallengeScoring();
 
     	// validate and score subchallenge 1
-   		
    		o("Sub-challenge 1 validation.");
-		sct.validate(SUBCHALLENGE.SUBCHALLENGE_1, "3154769");
+		sct.validate(SUBCHALLENGE.SUBCHALLENGE_1, "3154769", PHASE.L);
   		o("Sub-challenge 1 scoring.");
   		sct.score(SUBCHALLENGE.SUBCHALLENGE_1, "3154769", SUB_CHALLENGE_1_QUOTA);
    		
     	// validate and score subchallenge 2
   		o("Sub-challenge 2 validation.");
-		sct.validate(SUBCHALLENGE.SUBCHALLENGE_2, "3154771");
+		sct.validate(SUBCHALLENGE.SUBCHALLENGE_2, "3154771", PHASE.L);
   		o("Sub-challenge 2 scoring.");
   		sct.score(SUBCHALLENGE.SUBCHALLENGE_2, "3154771", SUB_CHALLENGE_2_QUOTA);
    		
-   		// TODO for final round, do we just zip up submitted files for manual scoring?
+   		// for final round, we just zip up submitted files for off-line scoring
+   		o("Sub-challenge 1 FINAL validation.");
+		sct.validate(SUBCHALLENGE.SUBCHALLENGE_1, "3375946", PHASE.F);
+   		o("Sub-challenge 1 FINAL Submission Collection.");
+  		sct.collect(SUBCHALLENGE.SUBCHALLENGE_1, "3375946");
+  		
+   		o("Sub-challenge 2 FINAL validation.");
+		sct.validate(SUBCHALLENGE.SUBCHALLENGE_2, "3375948", PHASE.F);
+   		o("Sub-challenge 2 FINAL Submission Collection.");
+ 		sct.collect(SUBCHALLENGE.SUBCHALLENGE_2, "3375948");
 
+ 		System.exit(0);
     }
     
     public void checkLeaderBoard() throws Exception {
@@ -207,7 +242,7 @@ public class OlfactionChallengeScoring {
 		return result;
     }
     
-    public static String validate(SUBCHALLENGE subchallenge, File inputFile, String phase) throws IOException {
+    public static String validate(SUBCHALLENGE subchallenge, File inputFile, PHASE phase) throws IOException {
 		// USAGE:perl DREAM_Olfactory_S1_validation.pl  <input file to validate> <output file> <flag L for Leaderboard or F for final submission>  
 	    String scriptName;
 	    
@@ -221,13 +256,12 @@ public class OlfactionChallengeScoring {
 	    default:
 	    	throw new IllegalArgumentException(subchallenge.name());
 	    }
-	    if (!(phase.equals("L") || phase.equals("F"))) throw new IllegalArgumentException(phase);
 		File outputFile = File.createTempFile("scriptOutput", ".txt");
 		outputFile.deleteOnExit();
-		File workingDirectory = outputFile.getParentFile();;
+		File workingDirectory = outputFile.getParentFile();
 	    // note, the validation file expects the input file PATH but the output file NAME
  		return OlfactionChallengeScoring.executePerlScript(scriptName, 
- 				new String[]{inputFile.getAbsolutePath(), outputFile.getName(), phase}, outputFile, workingDirectory);
+ 				new String[]{inputFile.getAbsolutePath(), outputFile.getName(), phase.name()}, outputFile, workingDirectory);
     }
     
     public static Map<String,Double> score(SUBCHALLENGE subchallenge, File inputFile, File goldStandard) throws IOException {
@@ -288,19 +322,15 @@ public class OlfactionChallengeScoring {
     	synapseAdmin.login(adminUserName, adminPassword);
     }
     
-    private static final DateFormat DF = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+     private static final DateFormat DF = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+     
+     private static final DateFormat FILENAME_SAFE_DF = new SimpleDateFormat("yyyy-MM-dd-HH-mm-ss");
     
     /**
-     * This demonstrates a lightweight validation step
-     * 
-     * Beyond simple validation, other criteria could be checked, e.g.
-     * whether the user has exceeded a limit on the number of submissions
-     * permitted in a given time period
-     * 
      * @throws SynapseException
      * @throws JSONException 
      */
-    public void validate(SUBCHALLENGE subchallenge, String evaluationId) throws SynapseException, IOException, JSONException {
+    public void validate(SUBCHALLENGE subchallenge, String evaluationId, PHASE phase) throws SynapseException, IOException, JSONException {
     	List<SubmissionStatus> statusesToUpdate = new ArrayList<SubmissionStatus>();
     	long total = Integer.MAX_VALUE;
     	int accepted = 0;
@@ -321,7 +351,7 @@ public class OlfactionChallengeScoring {
        			String validationResult = "";
        			try {
        				o("Validating submission: "+sub.getId());
-       				validationResult = validate(subchallenge,temp, "L"/*"leader board" phase*/);
+       				validationResult = validate(subchallenge,temp, phase);
        				fileIsOK = !validationResult.contains("NOT_OK");
        			} catch (Exception e) {
        				fileIsOK = false;
@@ -610,6 +640,22 @@ public class OlfactionChallengeScoring {
     	}
     }
     
+    private static String getFileNameFromEntityBundle(String s) {
+    	try {
+	    	JSONObject bundle = new JSONObject(s);
+	    	JSONArray fileHandles = (JSONArray)bundle.get("fileHandles");
+	    	for (int i=0; i<fileHandles.length(); i++) {
+	    		JSONObject fileHandle = fileHandles.getJSONObject(i);
+	    		if (!fileHandle.get("concreteType").equals("org.sagebionetworks.repo.model.file.PreviewFileHandle")) {
+	    			return (String)fileHandle.get("fileName");
+	    		}
+	    	}
+	    	throw new IllegalArgumentException("File has no file name");
+    	} catch (JSONException e) {
+    		throw new RuntimeException(e);
+    	}
+    }
+    
     private static String formatInterval(final long l) {
         final long hr = TimeUnit.MILLISECONDS.toHours(l);
         final long min = TimeUnit.MILLISECONDS.toMinutes(l - TimeUnit.HOURS.toMillis(hr));
@@ -729,5 +775,92 @@ public class OlfactionChallengeScoring {
 		scIntern.setFileEndpoint("https://repo-prod.prod.sagebase.org/file/v1");
 		return SynapseProfileProxy.createProfileProxy(scIntern);
 	}
+	
+    /**
+     * 
+     * collect received submissions into a single zip file
+     * naming convention is: <userid>_<timestamp>_<submissionid>_<original_file_name>
+     * 
+     * @throws SynapseException
+     * @throws JSONException 
+     * @throws JSONObjectAdapterException 
+     */
+    public void collect(SUBCHALLENGE subchallenge, String evaluationId) throws SynapseException, IOException, JSONException, JSONObjectAdapterException {
+    	List<SubmissionStatus> statusesToUpdate = new ArrayList<SubmissionStatus>();
+    	long total = Integer.MAX_VALUE;
+    	int processed = 0;
+    	List<Pair<File,String>> filesToZip = new ArrayList<>();
+       	for (int offset=0; offset<total; offset+=PAGE_SIZE) {
+       		// get the VALIDATED Submissions
+       		PaginatedResults<SubmissionBundle> submissionPGs = 
+           		synapseAdmin.getAllSubmissionBundlesByStatus(evaluationId, SubmissionStatusEnum.VALIDATED, offset, PAGE_SIZE);
+        	total = (int)submissionPGs.getTotalNumberOfResults();
+        	List<SubmissionBundle> page = submissionPGs.getResults();
+        	for (int i=0; i<page.size(); i++) {
+        		SubmissionBundle bundle = page.get(i);
+        		Submission sub = bundle.getSubmission();
+       			File temp = downloadSubmissionFile(sub);
+       			temp.deleteOnExit();
+       			String fileName = getFileNameFromEntityBundle(sub.getEntityBundleJSON());
+       			String fileNameInZip = sub.getUserId()+"_"+FILENAME_SAFE_DF.format(sub.getCreatedOn())+
+       					"_"+sub.getId()+"_"+fileName;
+       			
+       			filesToZip.add(new Pair<File,String>(temp, fileNameInZip));
+       			
+       			SubmissionStatusEnum newStatus = SubmissionStatusEnum.CLOSED;
+       			processed++;
+           		SubmissionStatus status = bundle.getSubmissionStatus();
+           		status.setStatus(newStatus);
+           	    statusesToUpdate.add(status);
+        	}
+       	}
+       	
+       	// now add the new files to the cumulative zip
+       	addFilesToZip(subchallenge, filesToZip);
+       	
+       	// we can update all the statuses in a batch
+       	updateSubmissionStatusBatch(evaluationId, statusesToUpdate);
+       	System.out.println(subchallenge+": Retrieved "+total+
+       			" submissions for validation and proccessed "+processed+".");
+    }
+    
+    private void addFilesToZip(SUBCHALLENGE subchallenge, List<Pair<File,String>> filesToZip) throws SynapseException, IOException, JSONObjectAdapterException {
+       	// download the zip
+		String zipFileEntityId = getProperty(subchallenge+"_ZIP_ENTITY_ID");
+      	FileEntity zipFileEntity = synapseAdmin.getEntity(zipFileEntityId, FileEntity.class);
+		File cumulativeZipFile = new File(TEMP_DIR, zipFileEntity.getName());
+       	synapseAdmin.downloadFromFileEntityCurrentVersion(zipFileEntityId, cumulativeZipFile);
+       	cumulativeZipFile.deleteOnExit();
+       	// add the new files
+       	addFilesToZip(cumulativeZipFile, filesToZip);
+       	// now upload
+       	FileHandleResults fhrs = synapseAdmin.getEntityFileHandlesForCurrentVersion(zipFileEntityId);
+       	String contentType = null;
+       	for (FileHandle fh : fhrs.getList()) {
+       		if (fh.getId().equals(zipFileEntity.getDataFileHandleId())) {
+       			contentType = fh.getContentType();
+       		}
+       	}
+       	FileHandle revisedFileHandle = synapseAdmin.createFileHandle(cumulativeZipFile, contentType, zipFileEntity.getParentId());
+       	zipFileEntity.setDataFileHandleId(revisedFileHandle.getId());
+       	synapseAdmin.putEntity(zipFileEntity);
+    }
+    
+    public static void addFilesToZip(File cumulativeZipFile, List<Pair<File,String>> filesToAdd) throws IOException {
+    	Map<String, String> env = new HashMap<>(); 
+    	env.put("create", "true");
+    	Path path = Paths.get(cumulativeZipFile.getAbsolutePath());
+    	URI uri = URI.create("jar:" + path.toUri());
+    	try (FileSystem fs = FileSystems.newFileSystem(uri, env)) {
+    		for (Pair<File,String> fileToAdd : filesToAdd) {
+    			File sourceFile = fileToAdd.getFirst();
+    			String fileNameInZip = fileToAdd.getSecond();
+    			Path nf = fs.getPath(fileNameInZip);
+    			try(InputStream is = new FileInputStream(sourceFile)) {
+    				Files.copy(is, nf);
+    			}
+    		}
+    	}
+    }
 
 }
