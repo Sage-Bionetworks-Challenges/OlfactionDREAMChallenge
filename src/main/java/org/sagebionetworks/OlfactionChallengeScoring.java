@@ -815,17 +815,20 @@ public class OlfactionChallengeScoring {
         	}
        	}
        	
-       	// now add the new files to the cumulative zip
-       	addFilesToZip(subchallenge, filesToZip);
-       	
-       	// we can update all the statuses in a batch
-       	updateSubmissionStatusBatch(evaluationId, statusesToUpdate);
+       	// now add the new files to the cumulative zip and update their status in the Evaluation queue
+       	if (!filesToZip.isEmpty()) {
+	       	addFilesToZip(subchallenge, filesToZip);
+	       	
+	       	// we can update all the statuses in a batch
+	       	updateSubmissionStatusBatch(evaluationId, statusesToUpdate);
+	    }
        	System.out.println(subchallenge+": Retrieved "+total+
        			" submissions for validation and proccessed "+processed+".");
     }
     
     private void addFilesToZip(SUBCHALLENGE subchallenge, List<Pair<File,String>> filesToZip) throws SynapseException, IOException, JSONObjectAdapterException {
-       	// download the zip
+    	if (filesToZip.isEmpty()) return;
+    	// download the zip
 		String zipFileEntityId = getProperty(subchallenge+"_ZIP_ENTITY_ID");
       	FileEntity zipFileEntity = synapseAdmin.getEntity(zipFileEntityId, FileEntity.class);
 		File cumulativeZipFile = new File(TEMP_DIR, zipFileEntity.getName());
